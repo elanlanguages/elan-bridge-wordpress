@@ -1,0 +1,9 @@
+/vendor/
+/.wpml/
+/build/
+/dist/
+/.claude/
+.wp-env.override.json
+*.log
+.DS_Store
+node_modules/
