@@ -34,8 +34,8 @@ defined( 'ABSPATH' ) || exit;
 final class GitHubReleaseUpdater {
 
 	private const TRANSIENT = 'elan_bridge_gh_release';
-	private const CACHE_TTL  = 6 * HOUR_IN_SECONDS;
-	private const MISS_TTL   = 15 * MINUTE_IN_SECONDS;
+	private const CACHE_TTL = 6 * HOUR_IN_SECONDS;
+	private const MISS_TTL  = 15 * MINUTE_IN_SECONDS;
 
 	private string $owner;
 	private string $repo;
@@ -194,7 +194,7 @@ final class GitHubReleaseUpdater {
 		}
 
 		if ( false === file_put_contents( $tmp, wp_remote_retrieve_body( $response ) ) ) { // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
-			@unlink( $tmp ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
+			wp_delete_file( $tmp );
 			return new \WP_Error( 'elan_bridge_write_failed', __( 'Could not write the downloaded update to disk.', 'elan-bridge' ) );
 		}
 
@@ -255,7 +255,13 @@ final class GitHubReleaseUpdater {
 			rawurlencode( $this->repo )
 		);
 
-		$response = wp_remote_get( $endpoint, array( 'timeout' => 10, 'headers' => $this->headers() ) );
+		$response = wp_remote_get(
+			$endpoint,
+			array(
+				'timeout' => 10,
+				'headers' => $this->headers(),
+			)
+		);
 
 		if ( is_wp_error( $response ) || 200 !== wp_remote_retrieve_response_code( $response ) ) {
 			set_transient( self::TRANSIENT, array(), self::MISS_TTL );
