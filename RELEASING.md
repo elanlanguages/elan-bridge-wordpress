@@ -43,10 +43,18 @@ slug) and registers `GitHubReleaseUpdater`, which:
 - downloads the release's `elan-bridge.zip` asset through the GitHub asset API
   and installs it.
 
-## ⚠️ The one decision: repo visibility vs. the update token
+## Repo visibility vs. the update token
+
+> **Decided: the repo is public.** Auto-update therefore works with **no token
+> and no per-site config** — installed sites fetch release metadata and download
+> the zip straight from the public GitHub API. This was verified end-to-end
+> (tokenless metadata fetch + asset download) against `v0.1.0`. The options below
+> are kept for reference in case the policy ever changes. The source is
+> readable; the `License: Proprietary` header still governs reuse
+> (source-available, not open source).
 
 Auto-update needs the installed site to reach the release asset. There are two
-supported paths — **pick one before relying on auto-update:**
+supported paths:
 
 | Option | What to do | Trade-off |
 |---|---|---|
