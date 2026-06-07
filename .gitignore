@@ -3,6 +3,8 @@
 /build/
 /dist/
 /.claude/
+/DEVELOPMENT.md
+/RELEASING.md
 .wp-env.override.json
 *.log
 .DS_Store

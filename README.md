@@ -82,8 +82,3 @@ at any time.
 Stuck, or have a question? Email
 [support@elanlanguages.com](mailto:support@elanlanguages.com), or reach out to
 your ELAN account manager.
-
----
-
-*Building on or contributing to the plugin? Developer setup, the REST API, and
-extension hooks are in [DEVELOPMENT.md](DEVELOPMENT.md).*
