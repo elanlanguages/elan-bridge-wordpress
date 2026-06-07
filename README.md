@@ -1,170 +1,89 @@
-# ELAN AI Bridge — WordPress plugin
+# ELAN AI Bridge for WordPress
 
-Exposes WPML-managed pages and their translations to the **ELAN AI Bridge**
-so the bridge can pull source segments, translate them, and (later) write
-translations back.
+Connect your multilingual WordPress site to the **ELAN AI Bridge** and translate
+your pages and posts automatically. Once connected, ELAN reads the content you
+choose, translates it into your site's languages, and writes the translations
+back into WPML — so your existing multilingual setup simply fills in.
 
-## Architecture (topology A — pull)
+There are no API keys to copy and no code to touch: install the plugin, click
+**Connect**, sign in to ELAN, and choose what to translate.
 
-```
-WordPress site                                  ELAN AI Bridge (bridge-api-connectors)
-┌───────────────────────────┐                  ┌──────────────────────────────────┐
-│  WPML  ── icl_* tables     │                  │  WordPressConnector              │
-│   ▲                        │   HTTP Basic     │   (adapters/connectors/wordpress)│
-│   │ wpml_* filters         │   App Password   │   provider="wordpress"           │
-│  elan-bridge plugin        │ ◀─────pull────── │   capabilities={READ, TRANSLATE} │
-│   /wp-json/elan/v1/...     │                  │                                  │
-│   (canonical CMS shape)    │ ──────JSON─────▶ │   → _common/cms.py pydantic      │
-└───────────────────────────┘                  └──────────────────────────────────┘
-```
+## Before you start
 
-- **This plugin is the server.** It never calls out to the bridge.
-- The plugin does the WPML-specific work and emits the **canonical CMS
-  vocabulary** (`TranslatableResource` / `TranslationKey` /
-  `ResourceWithTranslations`) that every bridge CMS connector speaks.
-- The bridge authenticates with a **WordPress Application Password** (the
-  `app_password` credential type already defined in the bridge) and pulls
-  from `/wp-json/elan/v1/...`. The connector is a thin pass-through.
+You'll need:
 
-"Segments" here are **translatable fields** (`title`, `content`, `excerpt`,
-plus anything added via the `elan_bridge_extra_translation_keys` filter).
-Sentence-level segmentation is the bridge's job (its `context_window` modes).
+- **WordPress 6.4 or newer** on **PHP 8.1 or newer** — most modern hosts already
+  qualify (*Tools → Site Health* will tell you, or ask your host).
+- **WPML** installed and active, with your languages already set up. ELAN
+  translates the content WPML manages, so your site needs to be multilingual
+  with WPML first.
+- An **ELAN AI Bridge account** — <https://app.elanlanguages.ai>.
+- An **administrator** login on your WordPress site (you need access to
+  *Settings*).
+- Your site must be **reachable over HTTPS from the internet**, so ELAN can read
+  your content. (A site that only runs on your laptop or behind a firewall can't
+  be reached.)
 
-## Prerequisites
+## 1. Install the plugin
 
-- **Docker Desktop** (running) and **Node 18+** — for `wp-env`.
-- A **WPML subscription**. WPML is commercial and not on wordpress.org. The
-  easiest path is the **OTGS Installer** plugin (`otgs-installer-plugin.<ver>.zip`,
-  from your wpml.org account) — it registers the site with your account and
-  downloads the WPML components from inside wp-admin. This plugin only needs
-  **WPML Multilingual CMS** (the core); String Translation is optional (for
-  interface strings) and the rest are irrelevant here. Drop OTGS in `.wpml/` (gitignored)
-  so `.wp-env.json` installs it on start. (Alternatively, if you have the
-  component zips directly, list them in `.wp-env.json` instead.)
-- A wpml.org account you can use to **register `http://localhost:8888`** as a
-  development site (WPML allows dev-site registration).
+1. Download the latest **`elan-bridge.zip`** from the
+   [Releases page](https://github.com/elanlanguages/elan-bridge-wordpress/releases).
+2. In your WordPress admin, go to **Plugins → Add New → Upload Plugin**.
+3. Choose `elan-bridge.zip`, click **Install Now**, then **Activate**.
 
-## 1. Bring up the demo (wp-env)
+## 2. Connect to ELAN
 
-```bash
-# Put the OTGS Installer here (gitignored). Filename must match .wp-env.json.
-mkdir -p .wpml
-cp ~/Downloads/otgs-installer-plugin.*.zip .wpml/
+1. Go to **Settings → ELAN AI Bridge**.
+2. Under **Content to translate**, tick the types you want ELAN to handle — for
+   example *Pages* and *Posts*.
+3. Click **Connect with ELAN**.
+4. You'll be sent to ELAN to **sign in and choose the organization** this site
+   belongs to. Approve the connection.
+5. You're returned to WordPress and the page shows **Connected**, with your
+   organization name. That's it.
 
-# Start WordPress + MariaDB + this plugin + the OTGS Installer, all in Docker.
-npx wp-env start
-```
+The plugin sets up the secure connection for you in the background — nothing to
+copy or paste.
 
-WordPress is now at **http://localhost:8888** (admin: `admin` / `password`).
-A second test instance runs on `:8889`.
+## What happens next
 
-> Want to boot WordPress *without* WPML first (e.g. before the zips arrive)?
-> Create `.wp-env.override.json` with a `"plugins": ["."]` array; it overrides
-> the committed config and is gitignored.
+ELAN pulls the content you selected, translates it into your site's WPML
+languages, and saves each translation as the matching WPML translation of the
+original page or post. You keep reviewing and publishing in WordPress and WPML
+exactly as you do today. Translation choices — which languages, glossaries, tone
+of voice — live in your ELAN account.
 
-Run WP-CLI / Composer / PHPUnit inside the containers with `npx wp-env run cli <cmd>`:
+## Keeping it up to date
 
-```bash
-npx wp-env run cli wp plugin list
-```
+Updates are **automatic**. When a new version is released, the usual **update
+notice** appears on your *Plugins* page — update it like any other plugin.
+There's nothing to re-download.
 
-## 2. Install + configure WPML (one-time, via the admin UI)
+## Disconnecting
 
-1. http://localhost:8888/wp-admin (admin / password) → **Plugins**. The OTGS
-   Installer adds a registration prompt / a **Commercial** tab under
-   *Plugins → Add New*. Register with your wpml.org account (add
-   `http://localhost:8888` as a development site to get a key).
-2. From the OTGS installer, **download + activate WPML Multilingual CMS** —
-   that's all this plugin needs (its reader uses only core `wpml_*` filters).
-   String Translation is optional; "Translation Management" is not a separate
-   plugin in current WPML (it's part of core).
-3. **WPML → Setup**: pick a content language (e.g. English), add target
-   languages (e.g. German, French), finish the wizard.
-4. Create a Page, then use the **language switcher in the post editor** to add
-   a German/French translation. Now you have a `trid` group with siblings —
-   exactly what the plugin surfaces.
+Go to **Settings → ELAN AI Bridge** and click **Disconnect**. That removes the
+connection and the secure password the plugin created for it. You can reconnect
+at any time.
 
-## 3. Create an Application Password (for the bridge)
+## Troubleshooting
 
-1. **Users → Profile → Application Passwords** (or create a dedicated service
-   user with an editorial role first).
-2. Name it `elan-bridge`, generate, and copy the password (shown once).
+- **The connect screen says WPML is required, or nothing happens.** Make sure
+  **WPML Multilingual CMS** is installed, active, and your languages are set up
+  under *WPML → Languages*.
+- **The connection failed.** Click **Connect with ELAN** again. If it keeps
+  failing, check that your site is reachable over **HTTPS from the internet**
+  and that you signed in to the correct ELAN organization.
+- **I don't see the *ELAN AI Bridge* menu.** Only administrators can connect —
+  sign in with an administrator account, and confirm the plugin is activated
+  under *Plugins*.
 
-## 4. Smoke-test the REST surface
+## Support
 
-```bash
-SITE=http://localhost:8888
-USER=admin
-APP_PW='xxxx xxxx xxxx xxxx xxxx xxxx'   # the generated app password
+Stuck, or have a question? Email
+[support@elanlanguages.com](mailto:support@elanlanguages.com), or reach out to
+your ELAN account manager.
 
-curl -s -u "$USER:$APP_PW" "$SITE/wp-json/elan/v1/health" | jq
-curl -s -u "$USER:$APP_PW" "$SITE/wp-json/elan/v1/locales" | jq
-curl -s -u "$USER:$APP_PW" "$SITE/wp-json/elan/v1/resources?type=page&limit=10" | jq
-curl -s -u "$USER:$APP_PW" "$SITE/wp-json/elan/v1/resources/<ID>/translations" | jq
-```
+---
 
-`Settings → ELAN AI Bridge` in wp-admin shows the exact `site_url` and pull
-URL to paste into the bridge.
-
-## 5. Connect from the bridge
-
-In `bridge-api-connectors`, add an `app_password` connection with
-`{site_url: http://host.docker.internal:8888, username, app_password}` and the
-`WordPressConnector` (provider `"wordpress"`) will pull. Use
-`host.docker.internal` (not `localhost`) if the bridge runs in its own container.
-
-## REST reference (`/wp-json/elan/v1`)
-
-| Method | Route | Returns |
-|---|---|---|
-| GET | `/health` | `{ok, plugin_version, wpml_active, default_language}` |
-| GET | `/locales` | `{locales: [{code, name, is_default, locale}]}` |
-| GET | `/resources?type=&locale=&cursor=&limit=` | `{resources: [{id, type, title, metadata}], next_cursor}` |
-| GET | `/resources/{id}/translations?locales=` | `{resource, source_locale, keys[], translations{key:{locale:value}}, metadata}` |
-
-All routes require an authenticated user with `manage_options` (or the
-`elan_bridge_pull` capability). `set_resource_translations` (write-back) is
-deferred until the bridge's approval queue lands.
-
-## Plugin development
-
-```bash
-composer install                 # PSR-4 autoload + dev tools
-composer lint                    # PHPCS against WordPress Coding Standards
-composer lint:fix                # PHPCBF autofix
-npx wp-env run tests-cli "cd /var/www/html/wp-content/plugins/elan-bridge && composer test"
-```
-
-Structure:
-
-```
-elan-bridge.php                  # plugin header + bootstrap
-includes/
-  Plugin.php                     # wiring (singleton, hook registration)
-  Wpml/WpmlReader.php            # WPML access via wpml_* filters (never raw SQL)
-  Rest/CmsController.php         # /wp-json/elan/v1/... routes
-  Admin/SettingsPage.php         # Settings → ELAN AI Bridge
-uninstall.php
-.wp-env.json                     # WordPress + WPML demo environment
-phpcs.xml.dist                   # coding standards
-```
-
-## Extending what gets translated
-
-Custom fields, ACF, SEO meta, or page-builder content aren't core post fields.
-Add them as translation keys without touching the plugin:
-
-```php
-add_filter( 'elan_bridge_extra_translation_keys', function ( array $keys, WP_Post $post, string $locale ) {
-    $subtitle = get_post_meta( $post->ID, 'subtitle', true );
-    if ( $subtitle ) {
-        $keys[] = array(
-            'key'           => 'meta.subtitle',
-            'source_value'  => $subtitle,
-            'source_locale' => $locale,
-            'source_digest' => hash( 'sha256', $subtitle ),
-        );
-    }
-    return $keys;
-}, 10, 3 );
-```
+*Building on or contributing to the plugin? Developer setup, the REST API, and
+extension hooks are in [DEVELOPMENT.md](DEVELOPMENT.md).*

@@ -54,6 +54,7 @@ rsync -a \
   --exclude 'composer.lock' \
   --exclude 'phpcs.xml.dist' \
   --exclude 'RELEASING.md' \
+  --exclude 'DEVELOPMENT.md' \
   --exclude '.gitignore' \
   --exclude '.gitattributes' \
   --exclude '*.log' \
