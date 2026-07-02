@@ -117,7 +117,7 @@ Liveness and environment check.
 ```json
 {
   "ok": true,
-  "plugin_version": "0.1.0",
+  "plugin_version": "0.1.1",
   "wpml_active": true,
   "default_language": "en"
 }

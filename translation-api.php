@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       Translation API
  * Description:       Exposes WPML-managed pages and their translations over a simple REST API so any external translation system can extract source strings and write translations back. Authenticated with an API key you create in the plugin's settings — no external service required.
- * Version:           0.1.0
+ * Version:           0.1.1
  * Requires at least: 6.4
  * Requires PHP:      8.1
  * Author:            ELAN Languages
@@ -22,7 +22,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'TRANSLATION_API_VERSION', '0.1.0' );
+define( 'TRANSLATION_API_VERSION', '0.1.1' );
 define( 'TRANSLATION_API_FILE', __FILE__ );
 define( 'TRANSLATION_API_DIR', plugin_dir_path( __FILE__ ) );
 define( 'TRANSLATION_API_URL', plugin_dir_url( __FILE__ ) );
