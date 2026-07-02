@@ -58,6 +58,17 @@ final class Plugin {
 		$openapi = new OpenApiController();
 		add_action( 'rest_api_init', array( $openapi, 'register_routes' ) );
 
+		// Allow the API-key header through CORS preflight, so browser tools on
+		// another origin can send it. WordPress already permits `Authorization`
+		// (our Bearer form); this gives `X-API-Key` the same reach.
+		add_filter(
+			'rest_allowed_cors_headers',
+			static function ( array $headers ): array {
+				$headers[] = 'X-API-Key';
+				return $headers;
+			}
+		);
+
 		if ( is_admin() ) {
 			$settings = new SettingsPage( $this->api_keys );
 			$settings->register_hooks();
