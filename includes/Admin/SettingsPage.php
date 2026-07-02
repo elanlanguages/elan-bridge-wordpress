@@ -32,7 +32,13 @@ final class SettingsPage {
 	private const NEW_KEY_TRANSIENT = 'translation_api_new_key_';
 	private const NEW_KEY_TTL       = 60;
 
+	/** Pinned major version of the Swagger UI assets loaded from the CDN. */
+	private const SWAGGER_UI_VERSION = '5.17.14';
+
 	private ApiKeyManager $api_keys;
+
+	/** The hook suffix of our settings page, for scoping asset enqueues. */
+	private string $page_hook = '';
 
 	public function __construct( ApiKeyManager $api_keys ) {
 		$this->api_keys = $api_keys;
@@ -40,12 +46,13 @@ final class SettingsPage {
 
 	public function register_hooks(): void {
 		add_action( 'admin_menu', array( $this, 'register_menu' ) );
+		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_docs_assets' ) );
 		add_action( 'admin_post_' . self::CREATE_ACTION, array( $this, 'handle_create' ) );
 		add_action( 'admin_post_' . self::REVOKE_ACTION, array( $this, 'handle_revoke' ) );
 	}
 
 	public function register_menu(): void {
-		add_options_page(
+		$this->page_hook = (string) add_options_page(
 			__( 'Translation API', 'translation-api' ),
 			__( 'Translation API', 'translation-api' ),
 			'manage_options',
@@ -54,17 +61,88 @@ final class SettingsPage {
 		);
 	}
 
+	/**
+	 * Load Swagger UI (from a CDN) only on our settings page, and only on the
+	 * API-docs tab so the keys tab stays dependency-free.
+	 */
+	public function enqueue_docs_assets( string $hook ): void {
+		if ( $hook !== $this->page_hook || 'docs' !== $this->current_tab() ) {
+			return;
+		}
+
+		$cdn = 'https://cdn.jsdelivr.net/npm/swagger-ui-dist@' . self::SWAGGER_UI_VERSION;
+		wp_enqueue_style( 'translation-api-swagger-ui', $cdn . '/swagger-ui.css', array(), self::SWAGGER_UI_VERSION );
+		wp_enqueue_script( 'translation-api-swagger-ui', $cdn . '/swagger-ui-bundle.js', array(), self::SWAGGER_UI_VERSION, true );
+
+		$init = 'window.addEventListener("load",function(){window.ui=SwaggerUIBundle({'
+			. 'url:' . wp_json_encode( rest_url( 'translation/v1/openapi' ) ) . ','
+			. 'dom_id:"#translation-api-swagger-ui",deepLinking:true,'
+			. 'presets:[SwaggerUIBundle.presets.apis]});});';
+		wp_add_inline_script( 'translation-api-swagger-ui', $init );
+	}
+
 	public function render(): void {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			return;
 		}
+		$tab = $this->current_tab();
 		echo '<div class="wrap"><h1>' . esc_html__( 'Translation API', 'translation-api' ) . '</h1>';
-		$this->render_notice();
-		$this->render_new_key();
-		$this->render_usage();
-		$this->render_create_form();
-		$this->render_key_table();
+		$this->render_tabs( $tab );
+		if ( 'docs' === $tab ) {
+			$this->render_docs();
+		} else {
+			$this->render_notice();
+			$this->render_new_key();
+			$this->render_usage();
+			$this->render_create_form();
+			$this->render_key_table();
+		}
 		echo '</div>';
+	}
+
+	private function current_tab(): string {
+		$tab = isset( $_GET['tab'] ) ? sanitize_key( wp_unslash( $_GET['tab'] ) ) : 'keys'; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only tab switch.
+		return 'docs' === $tab ? 'docs' : 'keys';
+	}
+
+	private function render_tabs( string $active ): void {
+		$base = admin_url( 'options-general.php?page=' . self::PAGE_SLUG );
+		$tabs = array(
+			'keys' => __( 'API keys', 'translation-api' ),
+			'docs' => __( 'API docs', 'translation-api' ),
+		);
+		echo '<h2 class="nav-tab-wrapper">';
+		foreach ( $tabs as $slug => $label ) {
+			printf(
+				'<a href="%1$s" class="nav-tab %2$s">%3$s</a>',
+				esc_url( add_query_arg( 'tab', $slug, $base ) ),
+				$active === $slug ? 'nav-tab-active' : '',
+				esc_html( $label )
+			);
+		}
+		echo '</h2>';
+	}
+
+	/**
+	 * The interactive API docs tab: Swagger UI rendered against the public
+	 * OpenAPI document. Use "Authorize" to enter a key before "Try it out".
+	 */
+	private function render_docs(): void {
+		$spec_url = esc_url( rest_url( 'translation/v1/openapi' ) );
+		?>
+		<p>
+			<?php esc_html_e( 'Interactive API reference. Click "Authorize" to enter an API key, then "Try it out" on any endpoint.', 'translation-api' ); ?>
+			<?php
+			printf(
+				/* translators: %s: OpenAPI spec URL */
+				esc_html__( 'The raw OpenAPI spec is public at %s.', 'translation-api' ),
+				'<code>' . $spec_url . '</code>' // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- esc_url'd above.
+			);
+			?>
+		</p>
+		<p class="description"><?php esc_html_e( 'Swagger UI is loaded from a public CDN (jsDelivr).', 'translation-api' ); ?></p>
+		<div id="translation-api-swagger-ui" style="margin-top:1rem;background:#fff"></div>
+		<?php
 	}
 
 	// -- create ------------------------------------------------------------
@@ -127,7 +205,9 @@ final class SettingsPage {
 	}
 
 	private function render_usage(): void {
-		$base = esc_url( rest_url( 'translation/v1' ) );
+		$base     = esc_url( rest_url( 'translation/v1' ) );
+		$spec_url = esc_url( rest_url( 'translation/v1/openapi' ) );
+		$docs_url = esc_url( add_query_arg( 'tab', 'docs', admin_url( 'options-general.php?page=' . self::PAGE_SLUG ) ) );
 		?>
 		<h2><?php esc_html_e( 'How to connect', 'translation-api' ); ?></h2>
 		<p><?php esc_html_e( 'Point your translation system at the REST base below and send an API key on every request, either as the X-API-Key header or as an Authorization: Bearer header.', 'translation-api' ); ?></p>
@@ -139,6 +219,17 @@ final class SettingsPage {
 			<tr>
 				<th scope="row"><?php esc_html_e( 'Example', 'translation-api' ); ?></th>
 				<td><code>curl -H "X-API-Key: &lt;key&gt;" <?php echo esc_html( $base ); ?>/health</code></td>
+			</tr>
+			<tr>
+				<th scope="row"><?php esc_html_e( 'OpenAPI spec', 'translation-api' ); ?></th>
+				<td>
+					<a href="<?php echo $spec_url; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- esc_url'd above. ?>"><code><?php echo esc_html( $spec_url ); ?></code></a>
+					<p class="description"><?php esc_html_e( 'Public OpenAPI 3.1 document — import it into Postman or a client generator.', 'translation-api' ); ?></p>
+				</td>
+			</tr>
+			<tr>
+				<th scope="row"><?php esc_html_e( 'Interactive docs', 'translation-api' ); ?></th>
+				<td><a href="<?php echo $docs_url; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- esc_url'd above. ?>"><?php esc_html_e( 'Open the API docs (Swagger UI)', 'translation-api' ); ?></a></td>
 			</tr>
 		</table>
 		<?php

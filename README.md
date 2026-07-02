@@ -55,6 +55,21 @@ https://your-site.example/wp-json/translation/v1
 screen.) Responses are JSON. `POST` bodies are JSON — send
 `Content-Type: application/json`.
 
+### OpenAPI spec & interactive docs
+
+The plugin publishes a machine-readable **OpenAPI 3.1** description of every
+route. It's **public** (no key needed) so you can import it straight into
+Postman, an API client, or a code generator:
+
+```
+GET https://your-site.example/wp-json/translation/v1/openapi
+```
+
+For an interactive reference, open **Settings → Translation API → API docs** —
+a built-in **Swagger UI** rendered against that spec. Click **Authorize** to
+enter a key, then **Try it out** on any endpoint. (Swagger UI loads from a
+public CDN; the spec URL above is what it reads.)
+
 ### Authentication
 
 Every request must carry a valid API key, sent **either** way:

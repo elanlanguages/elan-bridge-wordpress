@@ -12,6 +12,7 @@ namespace TranslationApi;
 use TranslationApi\Admin\SettingsPage;
 use TranslationApi\Auth\ApiKeyManager;
 use TranslationApi\Rest\CmsController;
+use TranslationApi\Rest\OpenApiController;
 use TranslationApi\Wpml\WpmlReader;
 
 defined( 'ABSPATH' ) || exit;
@@ -52,6 +53,10 @@ final class Plugin {
 	public function boot(): void {
 		$controller = new CmsController( $this->wpml, $this->api_keys );
 		add_action( 'rest_api_init', array( $controller, 'register_routes' ) );
+
+		// Public OpenAPI (Swagger) document describing the routes above.
+		$openapi = new OpenApiController();
+		add_action( 'rest_api_init', array( $openapi, 'register_routes' ) );
 
 		if ( is_admin() ) {
 			$settings = new SettingsPage( $this->api_keys );

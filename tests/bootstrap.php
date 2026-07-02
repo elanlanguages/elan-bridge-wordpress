@@ -109,6 +109,19 @@ if ( ! class_exists( 'WP_REST_Request' ) ) {
 	}
 }
 
+// The OpenAPI document embeds the plugin version and a REST base URL.
+defined( 'TRANSLATION_API_VERSION' ) || define( 'TRANSLATION_API_VERSION', '0.0.0-test' );
+if ( ! function_exists( 'rest_url' ) ) {
+	function rest_url( string $path = '' ): string {
+		return 'https://example.test/wp-json/' . ltrim( $path, '/' );
+	}
+}
+if ( ! function_exists( 'untrailingslashit' ) ) {
+	function untrailingslashit( string $value ): string {
+		return rtrim( $value, '/\\' );
+	}
+}
+
 /** Reset shared test state between tests. */
 function ta_reset_test_state(): void {
 	$GLOBALS['__ta_options']      = array();
@@ -118,3 +131,4 @@ function ta_reset_test_state(): void {
 require __DIR__ . '/../includes/Auth/ApiKeyManager.php';
 require __DIR__ . '/../includes/Wpml/WpmlReader.php';
 require __DIR__ . '/../includes/Rest/CmsController.php';
+require __DIR__ . '/../includes/Rest/OpenApiController.php';

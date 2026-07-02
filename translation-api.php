@@ -1,7 +1,6 @@
 <?php
 /**
  * Plugin Name:       Translation API
- * Plugin URI:        https://github.com/elanlanguages/translation-api-wordpress
  * Description:       Exposes WPML-managed pages and their translations over a simple REST API so any external translation system can extract source strings and write translations back. Authenticated with an API key you create in the plugin's settings — no external service required.
  * Version:           0.1.0
  * Requires at least: 6.4
