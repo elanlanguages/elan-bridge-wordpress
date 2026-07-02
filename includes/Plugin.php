@@ -23,9 +23,9 @@ defined( 'ABSPATH' ) || exit;
  * screen where those keys are created and revoked.
  *
  * Topology: this plugin is a self-contained REST *server*. Any client that
- * holds a valid API key (sent as `X-API-Key`, or `Authorization: Bearer`) may
- * read source strings from `/wp-json/translation/v1/...` and write
- * translations back. There is no outbound coupling to any external service.
+ * holds a valid API key (sent as `Authorization: Bearer <key>`) may read source
+ * strings from `/wp-json/translation/v1/...` and write translations back. There
+ * is no outbound coupling to any external service.
  */
 final class Plugin {
 
@@ -57,17 +57,6 @@ final class Plugin {
 		// Public OpenAPI (Swagger) document describing the routes above.
 		$openapi = new OpenApiController();
 		add_action( 'rest_api_init', array( $openapi, 'register_routes' ) );
-
-		// Allow the API-key header through CORS preflight, so browser tools on
-		// another origin can send it. WordPress already permits `Authorization`
-		// (our Bearer form); this gives `X-API-Key` the same reach.
-		add_filter(
-			'rest_allowed_cors_headers',
-			static function ( array $headers ): array {
-				$headers[] = 'X-API-Key';
-				return $headers;
-			}
-		);
 
 		if ( is_admin() ) {
 			$settings = new SettingsPage( $this->api_keys );

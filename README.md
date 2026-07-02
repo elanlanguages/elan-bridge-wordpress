@@ -72,28 +72,29 @@ public CDN; the spec URL above is what it reads.)
 
 ### Authentication
 
-Every request must carry a valid API key, sent **either** way:
-
-```
-X-API-Key: <your-key>
-```
+Every request must carry a valid API key in the `Authorization` header, using
+the `Bearer` scheme:
 
 ```
 Authorization: Bearer <your-key>
 ```
 
-If both are present, `X-API-Key` wins. A valid key makes the request act as the
-WordPress user who created it, so the API can read drafts and private posts and
-attribute write-backs just as that administrator could. Requests without a valid
-key get `401 Unauthorized`:
+A valid key makes the request act as the WordPress user who created it, so the
+API can read drafts and private posts and attribute write-backs just as that
+administrator could. Requests without a valid key get `401 Unauthorized`:
 
 ```json
 {
   "code": "translation_api_forbidden",
-  "message": "A valid API key is required. Send it as the X-API-Key header.",
+  "message": "A valid API key is required. Send it as an Authorization: Bearer header.",
   "data": { "status": 401 }
 }
 ```
+
+> Some Apache/CGI hosts strip the `Authorization` header before it reaches PHP
+> (the same condition WordPress Application Passwords face). If every request
+> comes back `401` even with a correct key, add this to your site's `.htaccess`:
+> `SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1`.
 
 ### Common concepts
 
@@ -123,7 +124,7 @@ Liveness and environment check.
 ```
 
 ```bash
-curl -H "X-API-Key: <key>" \
+curl -H "Authorization: Bearer <key>" \
   https://your-site.example/wp-json/translation/v1/health
 ```
 
@@ -199,7 +200,7 @@ on the last page. Statuses listed include `publish`, `draft`, `pending`,
 active.
 
 ```bash
-curl -H "X-API-Key: <key>" \
+curl -H "Authorization: Bearer <key>" \
   "https://your-site.example/wp-json/translation/v1/resources?type=page&limit=100"
 ```
 
@@ -263,7 +264,7 @@ translation.
 **Errors:** `404` if the resource doesn't exist; `409` if WPML is not active.
 
 ```bash
-curl -H "X-API-Key: <key>" \
+curl -H "Authorization: Bearer <key>" \
   "https://your-site.example/wp-json/translation/v1/resources/42/translations?locales=de,fr"
 ```
 
@@ -315,7 +316,7 @@ the source resource doesn't exist; **`409`** if WPML is not active.
 
 ```bash
 curl -X POST \
-  -H "X-API-Key: <key>" -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <key>" -H "Content-Type: application/json" \
   -d '{"locale":"de","values":{"title":"Über uns"}}' \
   https://your-site.example/wp-json/translation/v1/resources/42/translations
 ```
@@ -353,8 +354,9 @@ To add custom fields, ACF, or SEO meta, use these filters from your own code:
 ## Troubleshooting
 
 - **Requests return "A valid API key is required".** Check the key is sent as
-  `X-API-Key` (some hosts strip the `Authorization` header), and that it hasn't
-  been revoked.
+  `Authorization: Bearer <key>` and hasn't been revoked. If it still fails on
+  every request, your host may be stripping the `Authorization` header — see the
+  `.htaccess` note under [Authentication](#authentication).
 - **Endpoints say WPML is not active.** Make sure **WPML Multilingual CMS** is
   installed, active, and your languages are set up under *WPML → Languages*.
 - **I don't see the *Translation API* menu.** Only administrators can manage

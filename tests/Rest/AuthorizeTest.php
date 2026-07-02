@@ -27,22 +27,21 @@ final class AuthorizeTest extends TestCase {
 		$this->controller = new CmsController( new WpmlReader(), $this->keys );
 	}
 
-	public function test_valid_key_via_x_api_key_header_authorizes_as_owner(): void {
-		[ $plaintext ] = $this->keys->create( 'CI', 5 );
-
-		$result = $this->controller->authorize( new WP_REST_Request( array( 'X-API-Key' => $plaintext ) ) );
-
-		$this->assertTrue( $result );
-		$this->assertSame( 5, $GLOBALS['__ta_current_user'] );
-	}
-
-	public function test_valid_key_via_authorization_bearer_header_authorizes(): void {
+	public function test_valid_key_via_authorization_bearer_header_authorizes_as_owner(): void {
 		[ $plaintext ] = $this->keys->create( 'CI', 8 );
 
 		$result = $this->controller->authorize( new WP_REST_Request( array( 'Authorization' => 'Bearer ' . $plaintext ) ) );
 
 		$this->assertTrue( $result );
 		$this->assertSame( 8, $GLOBALS['__ta_current_user'] );
+	}
+
+	public function test_bearer_scheme_is_case_insensitive(): void {
+		[ $plaintext ] = $this->keys->create( 'CI', 8 );
+
+		$result = $this->controller->authorize( new WP_REST_Request( array( 'Authorization' => 'bearer ' . $plaintext ) ) );
+
+		$this->assertTrue( $result );
 	}
 
 	public function test_missing_key_is_rejected_and_sets_no_user(): void {
@@ -54,10 +53,28 @@ final class AuthorizeTest extends TestCase {
 		$this->assertSame( 0, $GLOBALS['__ta_current_user'] );
 	}
 
+	public function test_x_api_key_header_is_no_longer_accepted(): void {
+		[ $plaintext ] = $this->keys->create( 'CI', 5 );
+
+		// The key is valid, but only the Authorization: Bearer transport counts.
+		$result = $this->controller->authorize( new WP_REST_Request( array( 'X-API-Key' => $plaintext ) ) );
+
+		$this->assertInstanceOf( WP_Error::class, $result );
+		$this->assertSame( 0, $GLOBALS['__ta_current_user'] );
+	}
+
+	public function test_authorization_without_bearer_prefix_is_rejected(): void {
+		[ $plaintext ] = $this->keys->create( 'CI', 5 );
+
+		$result = $this->controller->authorize( new WP_REST_Request( array( 'Authorization' => $plaintext ) ) );
+
+		$this->assertInstanceOf( WP_Error::class, $result );
+	}
+
 	public function test_wrong_key_is_rejected(): void {
 		$this->keys->create( 'CI', 5 );
 
-		$result = $this->controller->authorize( new WP_REST_Request( array( 'X-API-Key' => 'tapi_wrong' ) ) );
+		$result = $this->controller->authorize( new WP_REST_Request( array( 'Authorization' => 'Bearer tapi_wrong' ) ) );
 
 		$this->assertInstanceOf( WP_Error::class, $result );
 		$this->assertSame( 0, $GLOBALS['__ta_current_user'] );
@@ -67,24 +84,8 @@ final class AuthorizeTest extends TestCase {
 		[ $plaintext, $record ] = $this->keys->create( 'CI', 5 );
 		$this->keys->revoke( $record['id'] );
 
-		$result = $this->controller->authorize( new WP_REST_Request( array( 'X-API-Key' => $plaintext ) ) );
+		$result = $this->controller->authorize( new WP_REST_Request( array( 'Authorization' => 'Bearer ' . $plaintext ) ) );
 
 		$this->assertInstanceOf( WP_Error::class, $result );
-	}
-
-	public function test_x_api_key_takes_precedence_over_bearer(): void {
-		[ $good ] = $this->keys->create( 'good', 3 );
-
-		$result = $this->controller->authorize(
-			new WP_REST_Request(
-				array(
-					'X-API-Key'     => $good,
-					'Authorization' => 'Bearer tapi_ignored',
-				)
-			)
-		);
-
-		$this->assertTrue( $result );
-		$this->assertSame( 3, $GLOBALS['__ta_current_user'] );
 	}
 }

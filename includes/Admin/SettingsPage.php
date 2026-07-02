@@ -210,7 +210,7 @@ final class SettingsPage {
 		$docs_url = esc_url( add_query_arg( 'tab', 'docs', admin_url( 'options-general.php?page=' . self::PAGE_SLUG ) ) );
 		?>
 		<h2><?php esc_html_e( 'How to connect', 'translation-api' ); ?></h2>
-		<p><?php esc_html_e( 'Point your translation system at the REST base below and send an API key on every request, either as the X-API-Key header or as an Authorization: Bearer header.', 'translation-api' ); ?></p>
+		<p><?php esc_html_e( 'Point your translation system at the REST base below and send an API key on every request as an Authorization: Bearer header.', 'translation-api' ); ?></p>
 		<table class="form-table" role="presentation">
 			<tr>
 				<th scope="row"><?php esc_html_e( 'REST base', 'translation-api' ); ?></th>
@@ -218,7 +218,7 @@ final class SettingsPage {
 			</tr>
 			<tr>
 				<th scope="row"><?php esc_html_e( 'Example', 'translation-api' ); ?></th>
-				<td><code>curl -H "X-API-Key: &lt;key&gt;" <?php echo esc_html( $base ); ?>/health</code></td>
+				<td><code>curl -H "Authorization: Bearer &lt;key&gt;" <?php echo esc_html( $base ); ?>/health</code></td>
 			</tr>
 			<tr>
 				<th scope="row"><?php esc_html_e( 'OpenAPI spec', 'translation-api' ); ?></th>

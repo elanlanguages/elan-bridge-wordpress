@@ -23,11 +23,10 @@ defined( 'ABSPATH' ) || exit;
  * translations in a stable, provider-neutral shape. This controller does the
  * WPML work; the client is a thin consumer.
  *
- * Auth: an API key created in the plugin's settings, sent as either
- * `X-API-Key: <key>` or `Authorization: Bearer <key>`. A valid key makes the
- * request act as the WordPress user who created it, so listing drafts/private
- * posts and writing translations back behave exactly as they would for that
- * admin.
+ * Auth: an API key created in the plugin's settings, sent as
+ * `Authorization: Bearer <key>`. A valid key makes the request act as the
+ * WordPress user who created it, so listing drafts/private posts and writing
+ * translations back behave exactly as they would for that admin.
  */
 final class CmsController {
 
@@ -158,20 +157,15 @@ final class CmsController {
 		}
 		return new WP_Error(
 			'translation_api_forbidden',
-			__( 'A valid API key is required. Send it as the X-API-Key header.', 'translation-api' ),
+			__( 'A valid API key is required. Send it as an Authorization: Bearer header.', 'translation-api' ),
 			array( 'status' => rest_authorization_required_code() )
 		);
 	}
 
 	/**
-	 * Read the API key from the request: prefer the dedicated `X-API-Key`
-	 * header, and also accept `Authorization: Bearer <key>`.
+	 * Read the API key from the request's `Authorization: Bearer <key>` header.
 	 */
 	private function presented_key( WP_REST_Request $request ): string {
-		$direct = trim( (string) $request->get_header( 'X-API-Key' ) );
-		if ( '' !== $direct ) {
-			return $direct;
-		}
 		$authorization = trim( (string) $request->get_header( 'Authorization' ) );
 		if ( 1 === preg_match( '/^Bearer\s+(.+)$/i', $authorization, $matches ) ) {
 			return trim( $matches[1] );

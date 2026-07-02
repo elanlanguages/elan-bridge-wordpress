@@ -57,13 +57,12 @@ final class OpenApiController {
 			'info'       => array(
 				'title'       => 'Translation API',
 				'version'     => TRANSLATION_API_VERSION,
-				'description' => 'Extract WPML source strings from a WordPress site and write translations back, over a simple REST API. Authenticate with an API key created under Settings → Translation API, sent as the `X-API-Key` header or as `Authorization: Bearer`.',
+				'description' => 'Extract WPML source strings from a WordPress site and write translations back, over a simple REST API. Authenticate with an API key created under Settings → Translation API, sent as `Authorization: Bearer <key>`.',
 			),
 			'servers'    => array(
 				array( 'url' => $base ),
 			),
 			'security'   => array(
-				array( 'ApiKeyAuth' => array() ),
 				array( 'BearerAuth' => array() ),
 			),
 			'tags'       => array(
@@ -192,14 +191,10 @@ final class OpenApiController {
 	private function components(): array {
 		return array(
 			'securitySchemes' => array(
-				'ApiKeyAuth' => array(
-					'type' => 'apiKey',
-					'in'   => 'header',
-					'name' => 'X-API-Key',
-				),
 				'BearerAuth' => array(
-					'type'   => 'http',
-					'scheme' => 'bearer',
+					'type'        => 'http',
+					'scheme'      => 'bearer',
+					'description' => 'Send the API key as `Authorization: Bearer <key>`.',
 				),
 			),
 			'schemas'         => array(

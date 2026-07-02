@@ -47,13 +47,10 @@ final class OpenApiSpecTest extends TestCase {
 		$this->assertArrayHasKey( 'post', $this->spec['paths']['/resources/{id}/translations'] );
 	}
 
-	public function test_security_schemes_cover_both_accepted_key_headers(): void {
+	public function test_the_only_security_scheme_is_bearer(): void {
 		$schemes = $this->spec['components']['securitySchemes'];
 
-		$this->assertSame( 'apiKey', $schemes['ApiKeyAuth']['type'] );
-		$this->assertSame( 'header', $schemes['ApiKeyAuth']['in'] );
-		$this->assertSame( 'X-API-Key', $schemes['ApiKeyAuth']['name'] );
-
+		$this->assertSame( array( 'BearerAuth' ), array_keys( $schemes ) );
 		$this->assertSame( 'http', $schemes['BearerAuth']['type'] );
 		$this->assertSame( 'bearer', $schemes['BearerAuth']['scheme'] );
 	}
