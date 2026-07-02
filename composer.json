@@ -1,6 +1,6 @@
 {
-  "name": "elan/elan-bridge",
-  "description": "Expose WPML-managed pages and translations to the ELAN AI Bridge in the canonical CMS-content shape.",
+  "name": "elan/translation-api",
+  "description": "Expose WPML-managed pages and translations over a simple API-key-authenticated REST API for any translation system.",
   "type": "wordpress-plugin",
   "license": "proprietary",
   "require": {
@@ -15,7 +15,7 @@
   },
   "autoload": {
     "psr-4": {
-      "ElanBridge\\": "includes/"
+      "TranslationApi\\": "includes/"
     }
   },
   "config": {

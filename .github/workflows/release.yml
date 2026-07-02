@@ -3,8 +3,7 @@ name: Release
 # Cut a release by pushing a semver tag, e.g.:
 #   git tag -a v0.2.0 -m "v0.2.0" && git push origin v0.2.0
 # The job verifies the plugin header version matches the tag, builds a clean
-# installable zip, and publishes it as a GitHub Release asset. The plugin's
-# self-updater (GitHubReleaseUpdater) then offers it to installed sites.
+# installable zip, and publishes it as a GitHub Release asset.
 on:
   push:
     tags:
@@ -32,6 +31,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${GITHUB_REF_NAME}" \
-            "dist/elan-bridge.zip" \
-            --title "ELAN AI Bridge ${GITHUB_REF_NAME}" \
+            "dist/translation-api.zip" \
+            --title "Translation API ${GITHUB_REF_NAME}" \
             --generate-notes

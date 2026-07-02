@@ -2,12 +2,12 @@
 /**
  * WPML access layer.
  *
- * @package ElanBridge
+ * @package TranslationApi
  */
 
 declare( strict_types=1 );
 
-namespace ElanBridge\Wpml;
+namespace TranslationApi\Wpml;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -27,8 +27,8 @@ defined( 'ABSPATH' ) || exit;
  *
  * "Segments" at this layer are *translatable fields* (title, content,
  * excerpt, selected meta) flattened into dotted keys. Sentence-level
- * segmentation is the bridge's job (its context_window modes), so we keep
- * this layer at field granularity and hand the bridge whole field values.
+ * segmentation is the consuming translation system's job, so we keep this
+ * layer at field granularity and hand out whole field values.
  */
 final class WpmlReader {
 
@@ -43,7 +43,7 @@ final class WpmlReader {
 	);
 
 	/**
-	 * Statuses the bridge may list and translate. Includes drafts, pending,
+	 * Statuses the API may list and translate. Includes drafts, pending,
 	 * scheduled and private so translations can be prepared *before* a page
 	 * (or the whole site) goes live — the common pre-launch workflow.
 	 * `trash` / `auto-draft` / `inherit` are intentionally excluded.
@@ -63,8 +63,8 @@ final class WpmlReader {
 	 * Configured locales as canonical rows: [{code, name, is_default}].
 	 *
 	 * WPML language codes (`en`, `de`, `pt-pt`) are close to BCP-47 but not
-	 * identical; the bridge connector normalises. We pass WPML's code through
-	 * and include `default_locale` (e.g. `de_DE`) in case the connector wants it.
+	 * identical; leave normalisation to the client. We pass WPML's code through
+	 * and include `default_locale` (e.g. `de_DE`) in case the client wants it.
 	 *
 	 * @return array<int, array{code:string, name:string, is_default:bool, locale:?string}>
 	 */
@@ -89,7 +89,7 @@ final class WpmlReader {
 	/**
 	 * A paginated slice of translatable resources of one post type.
 	 *
-	 * Lists only source-language rows so the bridge sees each piece of
+	 * Lists only source-language rows so the client sees each piece of
 	 * content once (its siblings are reachable via get_translations()).
 	 *
 	 * @param string  $post_type WordPress post type (page, post, ...).
@@ -137,7 +137,7 @@ final class WpmlReader {
 	/**
 	 * A resource plus every translatable key and every known translation.
 	 *
-	 * Shape mirrors the bridge's `ResourceWithTranslations`:
+	 * Response shape:
 	 *   resource, source_locale, keys[], translations{key:{locale:value}}, metadata.
 	 *
 	 * @param int           $post_id Source post id.
@@ -199,8 +199,7 @@ final class WpmlReader {
 			'source_locale' => $source_locale,
 			'keys'          => $keys,
 			// Cast to object so an empty map serializes as JSON `{}`, not `[]`.
-			// The canonical shape (and the bridge's pydantic
-			// `dict[str, dict[str, str]]`) requires an object even when empty.
+			// The shape is a `{key: {locale: value}}` object even when empty.
 			'translations'  => (object) $translations,
 			'metadata'      => $this->post_metadata( $source ),
 		);
@@ -224,11 +223,10 @@ final class WpmlReader {
 	/**
 	 * Create or update the WPML translation of a resource in one locale.
 	 *
-	 * This is the write-back the bridge calls after translating: it takes the
-	 * AI-produced values, writes them onto the target-language post (creating
+	 * This is the write-back a client calls after translating: it takes the
+	 * translated values, writes them onto the target-language post (creating
 	 * it if absent), and links it into the source's `trid` group so WPML
-	 * treats it as the translation. One locale per call — mirrors the bridge's
-	 * `SetResourceTranslationsInput`.
+	 * treats it as the translation. One locale per call.
 	 *
 	 * @param int                  $source_post_id Source (default-language) post id.
 	 * @param string               $locale         Target WPML locale code.
@@ -314,14 +312,14 @@ final class WpmlReader {
 
 		/**
 		 * Write non-core translated keys (custom fields, ACF, SEO meta) onto
-		 * the translation post. Symmetric to `elan_bridge_extra_translation_keys`.
+		 * the translation post. Symmetric to `translation_api_extra_translation_keys`.
 		 *
 		 * @param int    $translation_id Target post id.
 		 * @param array  $extra          {key: translated_value} not mapped to core fields.
 		 * @param string $locale         Target locale.
 		 * @param WP_Post $source         Source post.
 		 */
-		$extra = apply_filters( 'elan_bridge_set_extra_translation_keys', $extra, (int) $result_id, $locale, $source );
+		$extra = apply_filters( 'translation_api_set_extra_translation_keys', $extra, (int) $result_id, $locale, $source );
 
 		return array(
 			'resource_id'  => (string) $source_post_id,
@@ -348,9 +346,9 @@ final class WpmlReader {
 	}
 
 	/**
-	 * Provider-native version primitives for change detection. The bridge
-	 * stores these on TranslatableResource.metadata; capturing them at pull
-	 * time is lossy if skipped, so we always populate them.
+	 * Provider-native version primitives for change detection. Clients can
+	 * store these to detect when a resource changed since the last pull;
+	 * capturing them at read time is lossy if skipped, so we always populate them.
 	 *
 	 * @return array<string, mixed>
 	 */
@@ -379,7 +377,7 @@ final class WpmlReader {
 				'key'           => $canonical_key,
 				'source_value'  => $value,
 				'source_locale' => $locale,
-				// sha256 hex — matches the bridge's _common.cms.digest().
+				// sha256 hex of the source value — clients use it to detect changes.
 				'source_digest' => hash( 'sha256', $value ),
 			);
 		}
@@ -392,7 +390,7 @@ final class WpmlReader {
 		 * @param WP_Post $post   The post being flattened.
 		 * @param string  $locale The locale of this post.
 		 */
-		$extra = apply_filters( 'elan_bridge_extra_translation_keys', array(), $post, $locale );
+		$extra = apply_filters( 'translation_api_extra_translation_keys', array(), $post, $locale );
 		if ( is_array( $extra ) ) {
 			$keys = array_merge( $keys, $extra );
 		}

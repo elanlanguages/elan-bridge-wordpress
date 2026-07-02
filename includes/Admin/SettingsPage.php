@@ -1,43 +1,53 @@
 <?php
 /**
- * Admin settings screen — one-click connect to the ELAN AI Bridge.
+ * Admin settings screen — create and revoke the API keys that guard the REST API.
  *
- * @package ElanBridge
+ * @package TranslationApi
  */
 
 declare( strict_types=1 );
 
-namespace ElanBridge\Admin;
+namespace TranslationApi\Admin;
 
-use ElanBridge\Connection\ConnectionManager;
+use TranslationApi\Auth\ApiKeyManager;
 
 defined( 'ABSPATH' ) || exit;
 
 /**
- * Settings → ELAN AI Bridge. Disconnected: a one-field connect form (ELAN
- * API key) plus post-type selection. Connected: a status panel + Disconnect.
+ * Settings → Translation API.
  *
- * The whole point is minimal WordPress setup — the admin pastes one key and
- * clicks Connect; the plugin mints the Application Password and registers
- * with the bridge. No credential copying, no WPML Translation Management.
+ * The whole page is API-key management: create a labelled key (shown once),
+ * see the keys that exist, and revoke any of them. It also shows the REST base
+ * URL so an integrator knows where to point their client. No external service,
+ * no connect flow — the plugin is a self-contained REST server.
  */
 final class SettingsPage {
 
-	private const PAGE_SLUG = 'elan-bridge';
+	private const PAGE_SLUG = 'translation-api';
 
-	/** Default ELAN app URL the plugin registers against. */
-	private const DEFAULT_BRIDGE_URL = 'https://app.elanlanguages.ai';
+	public const CREATE_ACTION = 'translation_api_create_key';
+	public const REVOKE_ACTION = 'translation_api_revoke_key';
 
-	private ConnectionManager $connection;
+	/** One-time store for a freshly minted key, so we can show it after the redirect. */
+	private const NEW_KEY_TRANSIENT = 'translation_api_new_key_';
+	private const NEW_KEY_TTL       = 60;
 
-	public function __construct( ConnectionManager $connection ) {
-		$this->connection = $connection;
+	private ApiKeyManager $api_keys;
+
+	public function __construct( ApiKeyManager $api_keys ) {
+		$this->api_keys = $api_keys;
+	}
+
+	public function register_hooks(): void {
+		add_action( 'admin_menu', array( $this, 'register_menu' ) );
+		add_action( 'admin_post_' . self::CREATE_ACTION, array( $this, 'handle_create' ) );
+		add_action( 'admin_post_' . self::REVOKE_ACTION, array( $this, 'handle_revoke' ) );
 	}
 
 	public function register_menu(): void {
 		add_options_page(
-			__( 'ELAN AI Bridge', 'elan-bridge' ),
-			__( 'ELAN AI Bridge', 'elan-bridge' ),
+			__( 'Translation API', 'translation-api' ),
+			__( 'Translation API', 'translation-api' ),
 			'manage_options',
 			self::PAGE_SLUG,
 			array( $this, 'render' )
@@ -48,101 +58,177 @@ final class SettingsPage {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			return;
 		}
-		echo '<div class="wrap"><h1>' . esc_html__( 'ELAN AI Bridge', 'elan-bridge' ) . '</h1>';
+		echo '<div class="wrap"><h1>' . esc_html__( 'Translation API', 'translation-api' ) . '</h1>';
 		$this->render_notice();
-		if ( $this->connection->is_connected() ) {
-			$this->render_connected();
-		} else {
-			$this->render_connect_form();
-		}
+		$this->render_new_key();
+		$this->render_usage();
+		$this->render_create_form();
+		$this->render_key_table();
 		echo '</div>';
 	}
 
+	// -- create ------------------------------------------------------------
+
+	public function handle_create(): void {
+		$this->guard( self::CREATE_ACTION );
+
+		$label = sanitize_text_field( wp_unslash( $_POST['label'] ?? '' ) );
+
+		[ $plaintext ] = $this->api_keys->create( $label, get_current_user_id() );
+
+		// Hand the plaintext to the next page load exactly once; it is the only
+		// time it can ever be shown.
+		set_transient( self::NEW_KEY_TRANSIENT . get_current_user_id(), $plaintext, self::NEW_KEY_TTL );
+
+		$this->redirect( 'created' );
+	}
+
+	// -- revoke ------------------------------------------------------------
+
+	public function handle_revoke(): void {
+		$this->guard( self::REVOKE_ACTION );
+
+		$id      = sanitize_text_field( wp_unslash( $_POST['key_id'] ?? '' ) );
+		$revoked = '' !== $id && $this->api_keys->revoke( $id );
+
+		$this->redirect( $revoked ? 'revoked' : 'error' );
+	}
+
+	// -- rendering ---------------------------------------------------------
+
 	private function render_notice(): void {
-		$notice = isset( $_GET['elan_notice'] ) ? sanitize_key( wp_unslash( $_GET['elan_notice'] ) ) : '';
-		if ( 'connected' === $notice ) {
-			$this->notice( 'success', __( 'Connected to the ELAN AI Bridge.', 'elan-bridge' ) );
-		} elseif ( 'disconnected' === $notice ) {
-			$this->notice( 'info', __( 'Disconnected from the ELAN AI Bridge.', 'elan-bridge' ) );
+		$notice = isset( $_GET['ta_notice'] ) ? sanitize_key( wp_unslash( $_GET['ta_notice'] ) ) : '';
+		if ( 'created' === $notice ) {
+			$this->notice( 'success', __( 'API key created.', 'translation-api' ) );
+		} elseif ( 'revoked' === $notice ) {
+			$this->notice( 'info', __( 'API key revoked.', 'translation-api' ) );
 		} elseif ( 'error' === $notice ) {
-			$err = (string) ( $this->connection->connection()['last_error'] ?? __( 'Could not connect.', 'elan-bridge' ) );
-			$this->notice( 'error', $err );
+			$this->notice( 'error', __( 'That key could not be found. It may already have been revoked.', 'translation-api' ) );
 		}
-	}
-
-	private function render_connect_form(): void {
-		// A deliberate white-label override (distinct from ELAN_BRIDGE_URL, which
-		// is the plugin's own folder URL defined in the bootstrap file).
-		$preset_url = defined( 'ELAN_BRIDGE_APP_URL' ) ? (string) ELAN_BRIDGE_APP_URL : '';
-		$saved      = (array) get_option( ConnectionManager::SETTINGS_OPTION, array() );
-		$bridge_url = $preset_url ?: ( (string) ( $saved['bridge_url'] ?? '' ) ?: self::DEFAULT_BRIDGE_URL );
-		$selected   = (array) ( $saved['post_types'] ?? array( 'page' ) );
-		?>
-		<p><?php esc_html_e( 'Click Connect, then sign in to ELAN and choose the organization this site belongs to. No API key to copy.', 'elan-bridge' ); ?></p>
-		<form action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" method="post">
-			<input type="hidden" name="action" value="<?php echo esc_attr( ConnectionManager::CONNECT_INIT_ACTION ); ?>" />
-			<?php wp_nonce_field( ConnectionManager::CONNECT_INIT_ACTION ); ?>
-			<table class="form-table" role="presentation">
-				<tr>
-					<th scope="row"><label for="bridge_url"><?php esc_html_e( 'ELAN URL', 'elan-bridge' ); ?></label></th>
-					<td>
-						<input name="bridge_url" id="bridge_url" type="url" class="regular-text"
-							value="<?php echo esc_attr( $bridge_url ); ?>"
-							placeholder="https://app.elanlanguages.ai"
-							<?php echo $preset_url ? 'readonly' : ''; ?> required />
-						<?php if ( $preset_url ) : ?>
-							<p class="description"><?php esc_html_e( 'Set by the site configuration.', 'elan-bridge' ); ?></p>
-						<?php endif; ?>
-					</td>
-				</tr>
-				<tr>
-					<th scope="row"><?php esc_html_e( 'Content to translate', 'elan-bridge' ); ?></th>
-					<td><?php $this->render_post_type_checkboxes( $selected ); ?></td>
-				</tr>
-			</table>
-			<?php submit_button( __( 'Connect with ELAN', 'elan-bridge' ) ); ?>
-		</form>
-		<?php
-	}
-
-	private function render_connected(): void {
-		$conn = $this->connection->connection();
-		$saved = (array) get_option( ConnectionManager::SETTINGS_OPTION, array() );
-		$types = implode( ', ', (array) ( $saved['post_types'] ?? array( 'page' ) ) );
-		?>
-		<div class="notice notice-success inline"><p>
-			<strong><?php esc_html_e( 'Connected', 'elan-bridge' ); ?></strong>
-			<?php
-			if ( ! empty( $conn['organization'] ) ) {
-				echo ' — ' . esc_html( (string) $conn['organization'] );
-			}
-			?>
-		</p></div>
-		<table class="form-table" role="presentation">
-			<tr><th><?php esc_html_e( 'Connection ID', 'elan-bridge' ); ?></th><td><code><?php echo esc_html( (string) ( $conn['connection_id'] ?? '' ) ); ?></code></td></tr>
-			<tr><th><?php esc_html_e( 'Pulling', 'elan-bridge' ); ?></th><td><?php echo esc_html( $types ); ?></td></tr>
-			<tr><th><?php esc_html_e( 'Connected at', 'elan-bridge' ); ?></th><td><?php echo esc_html( (string) ( $conn['connected_at'] ?? '' ) ); ?> UTC</td></tr>
-		</table>
-		<form action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" method="post">
-			<input type="hidden" name="action" value="<?php echo esc_attr( ConnectionManager::DISCONNECT_ACTION ); ?>" />
-			<?php wp_nonce_field( ConnectionManager::DISCONNECT_ACTION ); ?>
-			<?php submit_button( __( 'Disconnect', 'elan-bridge' ), 'delete' ); ?>
-		</form>
-		<?php
 	}
 
 	/**
-	 * @param array<int,string> $selected
+	 * Show a freshly minted key once, then burn it. This is the only moment the
+	 * plaintext is ever visible — only its hash is stored.
 	 */
-	private function render_post_type_checkboxes( array $selected ): void {
-		foreach ( get_post_types( array( 'public' => true ), 'objects' ) as $type ) {
-			printf(
-				'<label style="display:block;margin:.2rem 0"><input type="checkbox" name="post_types[]" value="%1$s" %2$s /> %3$s</label>',
-				esc_attr( $type->name ),
-				checked( in_array( $type->name, $selected, true ), true, false ),
-				esc_html( $type->labels->singular_name . ' (' . $type->name . ')' )
-			);
+	private function render_new_key(): void {
+		$transient_key = self::NEW_KEY_TRANSIENT . get_current_user_id();
+		$plaintext     = get_transient( $transient_key );
+		if ( ! is_string( $plaintext ) || '' === $plaintext ) {
+			return;
 		}
+		delete_transient( $transient_key );
+		?>
+		<div class="notice notice-success">
+			<p><strong><?php esc_html_e( 'Copy your new API key now — it will not be shown again.', 'translation-api' ); ?></strong></p>
+			<p><input type="text" readonly class="large-text code" onclick="this.select()" value="<?php echo esc_attr( $plaintext ); ?>" /></p>
+		</div>
+		<?php
+	}
+
+	private function render_usage(): void {
+		$base = esc_url( rest_url( 'translation/v1' ) );
+		?>
+		<h2><?php esc_html_e( 'How to connect', 'translation-api' ); ?></h2>
+		<p><?php esc_html_e( 'Point your translation system at the REST base below and send an API key on every request, either as the X-API-Key header or as an Authorization: Bearer header.', 'translation-api' ); ?></p>
+		<table class="form-table" role="presentation">
+			<tr>
+				<th scope="row"><?php esc_html_e( 'REST base', 'translation-api' ); ?></th>
+				<td><code><?php echo esc_html( $base ); ?></code></td>
+			</tr>
+			<tr>
+				<th scope="row"><?php esc_html_e( 'Example', 'translation-api' ); ?></th>
+				<td><code>curl -H "X-API-Key: &lt;key&gt;" <?php echo esc_html( $base ); ?>/health</code></td>
+			</tr>
+		</table>
+		<?php
+	}
+
+	private function render_create_form(): void {
+		?>
+		<h2><?php esc_html_e( 'Create an API key', 'translation-api' ); ?></h2>
+		<form action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" method="post">
+			<input type="hidden" name="action" value="<?php echo esc_attr( self::CREATE_ACTION ); ?>" />
+			<?php wp_nonce_field( self::CREATE_ACTION ); ?>
+			<table class="form-table" role="presentation">
+				<tr>
+					<th scope="row"><label for="ta_label"><?php esc_html_e( 'Label', 'translation-api' ); ?></label></th>
+					<td>
+						<input name="label" id="ta_label" type="text" class="regular-text" placeholder="<?php esc_attr_e( 'e.g. Acme TMS', 'translation-api' ); ?>" />
+						<p class="description"><?php esc_html_e( 'A name to help you recognise this key later.', 'translation-api' ); ?></p>
+					</td>
+				</tr>
+			</table>
+			<?php submit_button( __( 'Create key', 'translation-api' ) ); ?>
+		</form>
+		<?php
+	}
+
+	private function render_key_table(): void {
+		$keys = $this->api_keys->all();
+		?>
+		<h2><?php esc_html_e( 'API keys', 'translation-api' ); ?></h2>
+		<?php if ( empty( $keys ) ) : ?>
+			<p><?php esc_html_e( 'No API keys yet. Create one above to start using the API.', 'translation-api' ); ?></p>
+			<?php
+			return;
+endif;
+		?>
+		<table class="wp-list-table widefat fixed striped">
+			<thead>
+				<tr>
+					<th><?php esc_html_e( 'Label', 'translation-api' ); ?></th>
+					<th><?php esc_html_e( 'Key', 'translation-api' ); ?></th>
+					<th><?php esc_html_e( 'Created', 'translation-api' ); ?></th>
+					<th><?php esc_html_e( 'Actions', 'translation-api' ); ?></th>
+				</tr>
+			</thead>
+			<tbody>
+				<?php foreach ( $keys as $key ) : ?>
+					<tr>
+						<td><?php echo esc_html( (string) ( $key['label'] ?? '' ) ); ?></td>
+						<td><code><?php echo esc_html( (string) ( $key['prefix'] ?? '' ) ); ?>…</code></td>
+						<td><?php echo esc_html( $this->format_date( (int) ( $key['created_at'] ?? 0 ) ) ); ?></td>
+						<td>
+							<form action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" method="post" onsubmit="return confirm('<?php echo esc_js( __( 'Revoke this key? Any client using it will stop working immediately.', 'translation-api' ) ); ?>');">
+								<input type="hidden" name="action" value="<?php echo esc_attr( self::REVOKE_ACTION ); ?>" />
+								<input type="hidden" name="key_id" value="<?php echo esc_attr( (string) ( $key['id'] ?? '' ) ); ?>" />
+								<?php wp_nonce_field( self::REVOKE_ACTION ); ?>
+								<?php submit_button( __( 'Revoke', 'translation-api' ), 'delete small', 'submit', false ); ?>
+							</form>
+						</td>
+					</tr>
+				<?php endforeach; ?>
+			</tbody>
+		</table>
+		<?php
+	}
+
+	// -- helpers -----------------------------------------------------------
+
+	private function guard( string $action ): void {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( esc_html__( 'You are not allowed to do this.', 'translation-api' ), '', array( 'response' => 403 ) );
+		}
+		check_admin_referer( $action );
+	}
+
+	private function redirect( string $notice ): void {
+		wp_safe_redirect(
+			add_query_arg(
+				'ta_notice',
+				$notice,
+				admin_url( 'options-general.php?page=' . self::PAGE_SLUG )
+			)
+		);
+		exit;
+	}
+
+	private function format_date( int $timestamp ): string {
+		if ( $timestamp <= 0 ) {
+			return '—';
+		}
+		return wp_date( (string) get_option( 'date_format', 'Y-m-d' ), $timestamp );
 	}
 
 	private function notice( string $type, string $message ): void {

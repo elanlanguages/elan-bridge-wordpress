@@ -2,9 +2,10 @@
 /**
  * Fired when the plugin is deleted.
  *
- * @package ElanBridge
+ * @package TranslationApi
  */
 
 defined( 'WP_UNINSTALL_PLUGIN' ) || exit;
 
-delete_option( 'elan_bridge_settings' );
+// Stored API keys (hashes) created in the plugin's settings.
+delete_option( 'translation_api_keys' );

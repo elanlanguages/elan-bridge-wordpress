@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
-<ruleset name="ELAN AI Bridge">
-	<description>WordPress coding standards for the ELAN AI Bridge plugin.</description>
+<ruleset name="Translation API">
+	<description>WordPress coding standards for the Translation API plugin.</description>
 
 	<file>.</file>
 	<exclude-pattern>vendor/*</exclude-pattern>
@@ -21,7 +21,7 @@
 	<rule ref="WordPress.WP.I18n">
 		<properties>
 			<property name="text_domain" type="array">
-				<element value="elan-bridge"/>
+				<element value="translation-api"/>
 			</property>
 		</properties>
 	</rule>

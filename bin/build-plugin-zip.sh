@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 #
-# Build a clean, installable elan-bridge.zip in the WordPress upload format
-# (a single top-level `elan-bridge/` folder). The plugin has no runtime
+# Build a clean, installable translation-api.zip in the WordPress upload format
+# (a single top-level `translation-api/` folder). The plugin has no runtime
 # dependencies, so this is a pure file-copy + zip — no PHP or Composer needed.
 #
 # Usage:
-#   bin/build-plugin-zip.sh                 # build dist/elan-bridge.zip
+#   bin/build-plugin-zip.sh                 # build dist/translation-api.zip
 #   bin/build-plugin-zip.sh --expect 0.1.0  # also assert the header version == 0.1.0
 #
 set -euo pipefail
 
-SLUG="elan-bridge"
+SLUG="translation-api"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
@@ -26,7 +26,7 @@ if [[ "${1:-}" == "--expect" ]]; then
   EXPECT="${2:-}"
   if [[ "${VERSION}" != "${EXPECT}" ]]; then
     echo "error: version mismatch — $SLUG.php header is '${VERSION}', tag expects '${EXPECT}'." >&2
-    echo "       Bump 'Version:' and ELAN_BRIDGE_VERSION in $SLUG.php before tagging." >&2
+    echo "       Bump 'Version:' and TRANSLATION_API_VERSION in $SLUG.php before tagging." >&2
     exit 1
   fi
 fi
@@ -62,7 +62,7 @@ rsync -a \
   ./ "$BUILD/$SLUG/"
 
 # Zip with the slug as the single top-level folder so WordPress installs into
-# wp-content/plugins/elan-bridge/.
+# wp-content/plugins/translation-api/.
 ( cd "$BUILD" && zip -rq "$DIST/$SLUG.zip" "$SLUG" -x '*.DS_Store' )
 cp "$DIST/$SLUG.zip" "$DIST/$SLUG-$VERSION.zip"
 rm -rf "$BUILD"

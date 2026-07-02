@@ -1,15 +1,16 @@
 <?php
 /**
- * REST controller — the surface the ELAN AI Bridge pulls from.
+ * REST controller — the surface an external translation system pulls from.
  *
- * @package ElanBridge
+ * @package TranslationApi
  */
 
 declare( strict_types=1 );
 
-namespace ElanBridge\Rest;
+namespace TranslationApi\Rest;
 
-use ElanBridge\Wpml\WpmlReader;
+use TranslationApi\Auth\ApiKeyManager;
+use TranslationApi\Wpml\WpmlReader;
 use WP_Error;
 use WP_REST_Request;
 use WP_REST_Response;
@@ -18,23 +19,27 @@ use WP_REST_Server;
 defined( 'ABSPATH' ) || exit;
 
 /**
- * Registers `/wp-json/elan/v1/...`, returning the canonical CMS-content
- * vocabulary the bridge's `_common/cms.py` defines. The connector on the
- * bridge side is a thin pass-through, so this controller does the WPML work.
+ * Registers `/wp-json/translation/v1/...`, returning source strings and their
+ * translations in a stable, provider-neutral shape. This controller does the
+ * WPML work; the client is a thin consumer.
  *
- * Auth: standard WordPress authentication via Application Passwords. Every
- * route requires `manage_options` (or the `elan_bridge_pull` capability if a
- * site maps it to a service role). The bridge sends HTTP Basic
- * `username:application-password`; WordPress validates it before we run.
+ * Auth: an API key created in the plugin's settings, sent as either
+ * `X-API-Key: <key>` or `Authorization: Bearer <key>`. A valid key makes the
+ * request act as the WordPress user who created it, so listing drafts/private
+ * posts and writing translations back behave exactly as they would for that
+ * admin.
  */
 final class CmsController {
 
-	private const NAMESPACE = 'elan/v1';
+	private const NAMESPACE = 'translation/v1';
 
 	private WpmlReader $wpml;
 
-	public function __construct( WpmlReader $wpml ) {
-		$this->wpml = $wpml;
+	private ApiKeyManager $api_keys;
+
+	public function __construct( WpmlReader $wpml, ApiKeyManager $api_keys ) {
+		$this->wpml     = $wpml;
+		$this->api_keys = $api_keys;
 	}
 
 	public function register_routes(): void {
@@ -142,25 +147,43 @@ final class CmsController {
 	}
 
 	/**
-	 * Permission gate. Application Passwords get the request authenticated as
-	 * a real user; we require an editorial capability on top.
+	 * Permission gate. Verifies the presented API key and, on success, assumes
+	 * the identity of the user that key belongs to for the rest of the request.
 	 */
-	public function authorize(): bool|WP_Error {
-		if ( current_user_can( 'manage_options' ) || current_user_can( 'elan_bridge_pull' ) ) {
+	public function authorize( WP_REST_Request $request ): bool|WP_Error {
+		$user_id = $this->api_keys->verify( $this->presented_key( $request ) );
+		if ( $user_id ) {
+			wp_set_current_user( $user_id );
 			return true;
 		}
 		return new WP_Error(
-			'elan_bridge_forbidden',
-			__( 'Application Password lacks the required capability.', 'elan-bridge' ),
+			'translation_api_forbidden',
+			__( 'A valid API key is required. Send it as the X-API-Key header.', 'translation-api' ),
 			array( 'status' => rest_authorization_required_code() )
 		);
+	}
+
+	/**
+	 * Read the API key from the request: prefer the dedicated `X-API-Key`
+	 * header, and also accept `Authorization: Bearer <key>`.
+	 */
+	private function presented_key( WP_REST_Request $request ): string {
+		$direct = trim( (string) $request->get_header( 'X-API-Key' ) );
+		if ( '' !== $direct ) {
+			return $direct;
+		}
+		$authorization = trim( (string) $request->get_header( 'Authorization' ) );
+		if ( 1 === preg_match( '/^Bearer\s+(.+)$/i', $authorization, $matches ) ) {
+			return trim( $matches[1] );
+		}
+		return '';
 	}
 
 	public function health(): WP_REST_Response {
 		return new WP_REST_Response(
 			array(
 				'ok'               => true,
-				'plugin_version'   => ELAN_BRIDGE_VERSION,
+				'plugin_version'   => TRANSLATION_API_VERSION,
 				'wpml_active'      => $this->wpml->is_active(),
 				'default_language' => $this->wpml->default_language(),
 			)
@@ -182,9 +205,9 @@ final class CmsController {
 		$post_type = (string) $request->get_param( 'type' );
 		if ( ! post_type_exists( $post_type ) ) {
 			return new WP_Error(
-				'elan_bridge_unknown_type',
+				'translation_api_unknown_type',
 				/* translators: %s: post type */
-				sprintf( __( 'Unknown post type: %s', 'elan-bridge' ), $post_type ),
+				sprintf( __( 'Unknown post type: %s', 'translation-api' ), $post_type ),
 				array( 'status' => 400 )
 			);
 		}
@@ -213,8 +236,8 @@ final class CmsController {
 		$result = $this->wpml->get_resource_translations( $post_id, $locales );
 		if ( null === $result ) {
 			return new WP_Error(
-				'elan_bridge_not_found',
-				__( 'Resource not found.', 'elan-bridge' ),
+				'translation_api_not_found',
+				__( 'Resource not found.', 'translation-api' ),
 				array( 'status' => 404 )
 			);
 		}
@@ -223,9 +246,9 @@ final class CmsController {
 	}
 
 	/**
-	 * Write-back: create or update the WPML translation for one locale with
-	 * the values the bridge produced. Destructive — the bridge gates this
-	 * behind its approval queue before calling.
+	 * Write-back: create or update the WPML translation for one locale with the
+	 * values the client produced. Destructive — the caller should gate this
+	 * behind its own review/approval before calling.
 	 */
 	public function set_resource_translations( WP_REST_Request $request ): WP_REST_Response|WP_Error {
 		if ( ! $this->wpml->is_active() ) {
@@ -238,8 +261,8 @@ final class CmsController {
 
 		if ( ! is_array( $values ) || array() === $values ) {
 			return new WP_Error(
-				'elan_bridge_bad_request',
-				__( '`values` must be a non-empty object of key -> translated value.', 'elan-bridge' ),
+				'translation_api_bad_request',
+				__( '`values` must be a non-empty object of key -> translated value.', 'translation-api' ),
 				array( 'status' => 400 )
 			);
 		}
@@ -255,8 +278,8 @@ final class CmsController {
 		$result = $this->wpml->set_resource_translations( $post_id, $locale, $clean );
 		if ( null === $result ) {
 			return new WP_Error(
-				'elan_bridge_not_found',
-				__( 'Resource not found.', 'elan-bridge' ),
+				'translation_api_not_found',
+				__( 'Resource not found.', 'translation-api' ),
 				array( 'status' => 404 )
 			);
 		}
@@ -267,8 +290,8 @@ final class CmsController {
 
 	private function wpml_inactive(): WP_Error {
 		return new WP_Error(
-			'elan_bridge_wpml_inactive',
-			__( 'WPML is not active on this site.', 'elan-bridge' ),
+			'translation_api_wpml_inactive',
+			__( 'WPML is not active on this site.', 'translation-api' ),
 			array( 'status' => 409 )
 		);
 	}

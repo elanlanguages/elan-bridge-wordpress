@@ -2,29 +2,29 @@
 /**
  * Plugin bootstrap.
  *
- * @package ElanBridge
+ * @package TranslationApi
  */
 
 declare( strict_types=1 );
 
-namespace ElanBridge;
+namespace TranslationApi;
 
-use ElanBridge\Admin\SettingsPage;
-use ElanBridge\Connection\ConnectionManager;
-use ElanBridge\Rest\CmsController;
-use ElanBridge\Updater\GitHubReleaseUpdater;
-use ElanBridge\Wpml\WpmlReader;
+use TranslationApi\Admin\SettingsPage;
+use TranslationApi\Auth\ApiKeyManager;
+use TranslationApi\Rest\CmsController;
+use TranslationApi\Wpml\WpmlReader;
 
 defined( 'ABSPATH' ) || exit;
 
 /**
- * Wires the plugin's pieces together: the REST surface the ELAN AI Bridge
- * pulls from, and the admin settings screen that configures it.
+ * Wires the plugin's pieces together: the REST surface an external translation
+ * system pulls from, the API-key store that authenticates it, and the admin
+ * screen where those keys are created and revoked.
  *
- * Topology: this plugin is the *server*. The bridge's WordPressConnector is
- * the client — it authenticates with a WordPress Application Password and
- * pulls the canonical CMS shape from `/wp-json/elan/v1/...`. We never call
- * out to the bridge from here; the bridge always initiates.
+ * Topology: this plugin is a self-contained REST *server*. Any client that
+ * holds a valid API key (sent as `X-API-Key`, or `Authorization: Bearer`) may
+ * read source strings from `/wp-json/translation/v1/...` and write
+ * translations back. There is no outbound coupling to any external service.
  */
 final class Plugin {
 
@@ -32,8 +32,11 @@ final class Plugin {
 
 	private WpmlReader $wpml;
 
+	private ApiKeyManager $api_keys;
+
 	private function __construct() {
-		$this->wpml = new WpmlReader();
+		$this->wpml     = new WpmlReader();
+		$this->api_keys = new ApiKeyManager();
 	}
 
 	public static function instance(): Plugin {
@@ -47,31 +50,22 @@ final class Plugin {
 	 * Register hooks. Called on `plugins_loaded`.
 	 */
 	public function boot(): void {
-		$controller = new CmsController( $this->wpml );
+		$controller = new CmsController( $this->wpml, $this->api_keys );
 		add_action( 'rest_api_init', array( $controller, 'register_routes' ) );
 
-		$connection = new ConnectionManager();
-		$connection->register_hooks();
-
 		if ( is_admin() ) {
-			$settings = new SettingsPage( $connection );
-			add_action( 'admin_menu', array( $settings, 'register_menu' ) );
+			$settings = new SettingsPage( $this->api_keys );
+			$settings->register_hooks();
 		}
 
-		// Self-hosted updates from GitHub Releases. Registered unconditionally
-		// (not just in admin) so WP-Cron's background update checks see it too.
-		( new GitHubReleaseUpdater(
-			'elanlanguages',
-			'elan-bridge-wordpress',
-			ELAN_BRIDGE_FILE,
-			ELAN_BRIDGE_VERSION,
-			defined( 'ELAN_BRIDGE_UPDATE_TOKEN' ) ? (string) ELAN_BRIDGE_UPDATE_TOKEN : null
-		) )->register_hooks();
-
-		load_plugin_textdomain( 'elan-bridge', false, dirname( plugin_basename( ELAN_BRIDGE_FILE ) ) . '/languages' );
+		load_plugin_textdomain( 'translation-api', false, dirname( plugin_basename( TRANSLATION_API_FILE ) ) . '/languages' );
 	}
 
 	public function wpml(): WpmlReader {
 		return $this->wpml;
+	}
+
+	public function api_keys(): ApiKeyManager {
+		return $this->api_keys;
 	}
 }

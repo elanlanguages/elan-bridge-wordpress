@@ -1,84 +1,106 @@
-# ELAN AI Bridge for WordPress
+# Translation API for WordPress
 
-Connect your multilingual WordPress site to the **ELAN AI Bridge** and translate
-your pages and posts automatically. Once connected, ELAN reads the content you
-choose, translates it into your site's languages, and writes the translations
-back into WPML — so your existing multilingual setup simply fills in.
+Expose your multilingual WordPress content over a small, self-contained REST
+API so any translation system can **read your source strings** and **write
+translations back** into WPML. Access is guarded by an **API key you create in
+the plugin's settings** — there's no external service to sign up for and nothing
+to connect to.
 
-There are no API keys to copy and no code to touch: install the plugin, click
-**Connect**, sign in to ELAN, and choose what to translate.
+This is the generic, standalone version: the plugin is purely a REST server on
+your own site. You (or your translation vendor) call it with an API key.
 
 ## Before you start
 
 You'll need:
 
-- **WordPress 6.4 or newer** on **PHP 8.1 or newer** — most modern hosts already
-  qualify (*Tools → Site Health* will tell you, or ask your host).
-- **WPML** installed and active, with your languages already set up. ELAN
-  translates the content WPML manages, so your site needs to be multilingual
-  with WPML first.
-- An **ELAN AI Bridge account** — <https://app.elanlanguages.ai>.
+- **WordPress 6.4 or newer** on **PHP 8.1 or newer** (*Tools → Site Health* will
+  tell you, or ask your host).
+- **WPML** installed and active, with your languages already set up. The API
+  reads and writes the content WPML manages, so your site needs to be
+  multilingual with WPML first.
 - An **administrator** login on your WordPress site (you need access to
-  *Settings*).
-- Your site must be **reachable over HTTPS from the internet**, so ELAN can read
-  your content. (A site that only runs on your laptop or behind a firewall can't
-  be reached.)
+  *Settings* to create API keys).
+- Your site should be **reachable over HTTPS** from wherever the translation
+  system runs, so it can call the API.
 
 ## 1. Install the plugin
 
-1. Download the latest **`elan-bridge.zip`** from the
-   [Releases page](https://github.com/elanlanguages/elan-bridge-wordpress/releases).
+1. Download the latest **`translation-api.zip`** from the
+   [Releases page](https://github.com/elanlanguages/translation-api-wordpress/releases)
+   (or build it with `bin/build-plugin-zip.sh`).
 2. In your WordPress admin, go to **Plugins → Add New → Upload Plugin**.
-3. Choose `elan-bridge.zip`, click **Install Now**, then **Activate**.
+3. Choose `translation-api.zip`, click **Install Now**, then **Activate**.
 
-## 2. Connect to ELAN
+## 2. Create an API key
 
-1. Go to **Settings → ELAN AI Bridge**.
-2. Under **Content to translate**, tick the types you want ELAN to handle — for
-   example *Pages* and *Posts*.
-3. Click **Connect with ELAN**.
-4. You'll be sent to ELAN to **sign in and choose the organization** this site
-   belongs to. Approve the connection.
-5. You're returned to WordPress and the page shows **Connected**, with your
-   organization name. That's it.
+1. Go to **Settings → Translation API**.
+2. Under **Create an API key**, give it a label (e.g. the name of the system
+   that will use it) and click **Create key**.
+3. **Copy the key immediately** — it's shown only once. Only a hashed form is
+   stored, so it can never be shown again. If you lose it, revoke it and create
+   a new one.
 
-The plugin sets up the secure connection for you in the background — nothing to
-copy or paste.
+You can create as many keys as you like (one per integration is a good idea)
+and revoke any of them at any time from the same screen.
 
-## What happens next
+## 3. Call the API
 
-ELAN pulls the content you selected, translates it into your site's WPML
-languages, and saves each translation as the matching WPML translation of the
-original page or post. You keep reviewing and publishing in WordPress and WPML
-exactly as you do today. Translation choices — which languages, glossaries, tone
-of voice — live in your ELAN account.
+Send the key on every request, either as an `X-API-Key` header or as an
+`Authorization: Bearer` header. The REST base is shown on the settings page and
+is `/wp-json/translation/v1` on your site.
 
-## Keeping it up to date
+```bash
+# Health check
+curl -H "X-API-Key: <key>" https://your-site.example/wp-json/translation/v1/health
 
-Updates are **automatic**. When a new version is released, the usual **update
-notice** appears on your *Plugins* page — update it like any other plugin.
-There's nothing to re-download.
+# List translatable pages
+curl -H "X-API-Key: <key>" "https://your-site.example/wp-json/translation/v1/resources?type=page"
 
-## Disconnecting
+# Get one page's source strings and existing translations
+curl -H "X-API-Key: <key>" https://your-site.example/wp-json/translation/v1/resources/42/translations
 
-Go to **Settings → ELAN AI Bridge** and click **Disconnect**. That removes the
-connection and the secure password the plugin created for it. You can reconnect
-at any time.
+# Write a translation back for one locale
+curl -X POST -H "X-API-Key: <key>" -H "Content-Type: application/json" \
+  -d '{"locale":"de","values":{"title":"Hallo","content":"..."}}' \
+  https://your-site.example/wp-json/translation/v1/resources/42/translations
+```
+
+### Endpoints
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/health` | Plugin version, whether WPML is active, default language. |
+| `GET` | `/locales` | The site's configured WPML locales. |
+| `GET` | `/resources?type=page&locale=&cursor=&limit=` | Paginated list of source-language resources of a post type. |
+| `GET` | `/resources/{id}/translations?locales=` | A resource's translatable keys plus every known translation. |
+| `POST` | `/resources/{id}/translations` | Create/update the WPML translation for one `locale` from a `values` map. |
+
+A valid API key makes the request act as the WordPress user who created it, so
+the API can list drafts and private posts and attribute write-backs just as that
+administrator could.
+
+## Extending what gets translated
+
+By default the API exposes the core post fields (`title`, `content`, `excerpt`).
+To add custom fields, ACF, or SEO meta, use these filters from your own code:
+
+- `translation_api_extra_translation_keys` — append extra source keys when
+  reading a post.
+- `translation_api_set_extra_translation_keys` — write those extra keys back on
+  the translation post.
+
+## Removing a key or the plugin
+
+- Revoke a key under **Settings → Translation API** — any client using it stops
+  working immediately.
+- Deleting the plugin removes all stored keys.
 
 ## Troubleshooting
 
-- **The connect screen says WPML is required, or nothing happens.** Make sure
-  **WPML Multilingual CMS** is installed, active, and your languages are set up
-  under *WPML → Languages*.
-- **The connection failed.** Click **Connect with ELAN** again. If it keeps
-  failing, check that your site is reachable over **HTTPS from the internet**
-  and that you signed in to the correct ELAN organization.
-- **I don't see the *ELAN AI Bridge* menu.** Only administrators can connect —
-  sign in with an administrator account, and confirm the plugin is activated
-  under *Plugins*.
-
-## Support
-
-Stuck, or have a question? Email
-[support@elanlanguages.com](mailto:support@elanlanguages.com), or reach out to
-your ELAN account manager.
+- **Requests return "A valid API key is required".** Check the key is sent as
+  `X-API-Key` (some hosts strip the `Authorization` header), and that it hasn't
+  been revoked.
+- **Endpoints say WPML is not active.** Make sure **WPML Multilingual CMS** is
+  installed, active, and your languages are set up under *WPML → Languages*.
+- **I don't see the *Translation API* menu.** Only administrators can manage
+  keys — sign in as an administrator and confirm the plugin is activated.
