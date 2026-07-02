@@ -1,0 +1,57 @@
+name: Build (generic)
+
+# Build pipeline for the standalone `generic-translation-api` branch: run the
+# unit tests, then build a clean, installable plugin zip and publish it as a
+# downloadable workflow artifact. Tagged releases are still cut by release.yml.
+on:
+  push:
+    branches: [generic-translation-api]
+  pull_request:
+    branches: [generic-translation-api]
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Unit tests (PHP ${{ matrix.php }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.1', '8.3']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+          tools: composer:v2
+
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Run unit tests
+        run: composer test
+
+  build:
+    name: Build installable zip
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read plugin version from the header
+        id: ver
+        run: |
+          version="$(grep -E '^\s*\*\s*Version:' translation-api.php | head -1 | sed -E 's/.*Version:[[:space:]]*//' | tr -d '[:space:]')"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Build plugin zip
+        run: bash bin/build-plugin-zip.sh
+
+      - name: Upload plugin zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: translation-api-${{ steps.ver.outputs.version }}
+          path: dist/translation-api.zip
+          if-no-files-found: error
