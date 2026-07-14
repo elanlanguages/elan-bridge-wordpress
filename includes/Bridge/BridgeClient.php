@@ -12,31 +12,27 @@ namespace ElanBridge\Bridge;
 defined( 'ABSPATH' ) || exit;
 
 /**
- * Talks to the bridge's connector endpoints, authenticated with the
- * customer's ELAN API key. Pairing sends credentials server-to-server; after
- * that, the event dispatcher posts only signed resource identifiers while the
- * bridge continues pulling content through the WordPress REST API.
+ * Starts the org-select pairing flow. Pairing sends credentials
+ * server-to-server; after that, the event dispatcher posts only signed
+ * resource identifiers while the bridge continues pulling content through the
+ * WordPress REST API.
  */
 final class BridgeClient {
 
+	/**
+	 * Bridge app base URL.
+	 *
+	 * @var string
+	 */
 	private string $base_url;
 
+	/**
+	 * Create a Bridge client.
+	 *
+	 * @param string $base_url Bridge app base URL.
+	 */
 	public function __construct( string $base_url ) {
 		$this->base_url = untrailingslashit( $base_url );
-	}
-
-	/**
-	 * Register this WordPress site as a connection on the bridge.
-	 *
-	 * The bridge authenticates the ELAN key, resolves the org, and stores a
-	 * `wordpress` / `app_password` connection pointing back at this site.
-	 *
-	 * @param string               $elan_key Customer ELAN API key (Bearer).
-	 * @param array<string, mixed> $payload  {site_url, username, app_password, label, post_types}.
-	 * @return array<string, mixed>|\WP_Error Decoded JSON (expects `connection_id`) or error.
-	 */
-	public function register( string $elan_key, array $payload ) {
-		return $this->request( 'POST', '/api/connectors/wordpress/register', $elan_key, $payload );
 	}
 
 	/**
@@ -47,43 +43,26 @@ final class BridgeClient {
 	 * @return array<string, mixed>|\WP_Error Decoded JSON (expects `handoff_id`) or error.
 	 */
 	public function initiate( array $payload ) {
-		return $this->request( 'POST', '/api/connectors/wordpress/initiate', '', $payload );
+		return $this->request( '/api/connectors/wordpress/initiate', $payload );
 	}
 
 	/**
-	 * Best-effort de-registration of a connection on the bridge.
+	 * Send one JSON request to the Bridge app.
 	 *
-	 * @return true|\WP_Error
-	 */
-	public function unregister( string $elan_key, string $connection_id ) {
-		$result = $this->request(
-			'DELETE',
-			'/api/connectors/wordpress/' . rawurlencode( $connection_id ),
-			$elan_key,
-			null
-		);
-		return is_wp_error( $result ) ? $result : true;
-	}
-
-	/**
-	 * @param array<string, mixed>|null $body
+	 * @param string               $path Request path.
+	 * @param array<string, mixed> $body JSON request body.
 	 * @return array<string, mixed>|\WP_Error
 	 */
-	private function request( string $method, string $path, string $elan_key, ?array $body ) {
-		$headers = array( 'Accept' => 'application/json' );
-		// The org-select pairing has no ELAN key; only send a Bearer when present.
-		if ( '' !== $elan_key ) {
-			$headers['Authorization'] = 'Bearer ' . $elan_key;
-		}
+	private function request( string $path, array $body ) {
 		$args = array(
-			'method'  => $method,
+			'method'  => 'POST',
 			'timeout' => 20,
-			'headers' => $headers,
+			'headers' => array(
+				'Accept'       => 'application/json',
+				'Content-Type' => 'application/json',
+			),
+			'body'    => wp_json_encode( $body ),
 		);
-		if ( null !== $body ) {
-			$args['headers']['Content-Type'] = 'application/json';
-			$args['body']                    = wp_json_encode( $body );
-		}
 
 		$resp = wp_remote_request( $this->base_url . $path, $args );
 		if ( is_wp_error( $resp ) ) {
@@ -94,11 +73,7 @@ final class BridgeClient {
 		$parsed = json_decode( wp_remote_retrieve_body( $resp ), true );
 
 		if ( $code < 200 || $code >= 300 ) {
-			// Nitro surfaces the reason in `message`; FastAPI uses `detail`.
-			$message = '';
-			if ( is_array( $parsed ) ) {
-				$message = (string) ( $parsed['message'] ?? $parsed['detail'] ?? '' );
-			}
+			$message = is_array( $parsed ) ? (string) ( $parsed['message'] ?? '' ) : '';
 			if ( '' === $message ) {
 				/* translators: %d: HTTP status code */
 				$message = sprintf( __( 'Bridge returned HTTP %d.', 'elan-bridge' ), $code );
