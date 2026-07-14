@@ -3,7 +3,7 @@
  * Plugin Name:       ELAN AI Bridge
  * Plugin URI:        https://elanlanguages.com
  * Description:       Exposes WPML-managed pages and their translations to the ELAN AI Bridge in the canonical CMS-content shape, so the bridge can pull source segments and write translations back.
- * Version:           0.1.0
+ * Version:           0.2.0
  * Requires at least: 6.4
  * Requires PHP:      8.1
  * Author:            ELAN Languages
@@ -24,7 +24,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'ELAN_BRIDGE_VERSION', '0.1.0' );
+define( 'ELAN_BRIDGE_VERSION', '0.2.0' );
 define( 'ELAN_BRIDGE_FILE', __FILE__ );
 define( 'ELAN_BRIDGE_DIR', plugin_dir_path( __FILE__ ) );
 define( 'ELAN_BRIDGE_URL', plugin_dir_url( __FILE__ ) );
