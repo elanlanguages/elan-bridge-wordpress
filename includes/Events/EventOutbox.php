@@ -202,7 +202,10 @@ final class EventOutbox implements OutboxStore {
 				'updated_gmt'   => $now,
 				'delivered_gmt' => $now,
 			),
-			array( 'id' => $id )
+			array(
+				'id'     => $id,
+				'status' => 'processing',
+			)
 		);
 	}
 
@@ -220,8 +223,8 @@ final class EventOutbox implements OutboxStore {
 			return;
 		}
 
-		if ( $this->active_id( $active_key ) > 0 ) {
-			$this->mark_superseded( $id, __( 'A newer resource version is queued.', 'elan-bridge' ) );
+		if ( $this->active_id( $active_key, $id ) > 0 ) {
+			$this->mark_superseded( $id, __( 'A newer resource version is queued.', 'elan-bridge' ), 'processing' );
 			return;
 		}
 
@@ -235,11 +238,14 @@ final class EventOutbox implements OutboxStore {
 				'last_error'       => $this->limit_error( $error ),
 				'updated_gmt'      => $now,
 			),
-			array( 'id' => $id )
+			array(
+				'id'     => $id,
+				'status' => 'processing',
+			)
 		);
 		if ( false === $result ) {
 			// Most commonly a concurrent newer event won the unique active key.
-			$this->mark_superseded( $id, __( 'A newer resource version replaced this retry.', 'elan-bridge' ) );
+			$this->mark_superseded( $id, __( 'A newer resource version replaced this retry.', 'elan-bridge' ), 'processing' );
 		}
 	}
 
@@ -258,7 +264,10 @@ final class EventOutbox implements OutboxStore {
 				'last_error'  => $this->limit_error( $error ),
 				'updated_gmt' => current_time( 'mysql', true ),
 			),
-			array( 'id' => $id )
+			array(
+				'id'     => $id,
+				'status' => 'processing',
+			)
 		);
 	}
 
@@ -311,7 +320,7 @@ final class EventOutbox implements OutboxStore {
 		foreach ( is_array( $dead ) ? $dead : array() as $row ) {
 			$active_key = sanitize_key( (string) ( $row['resource_type'] ?? '' ) ) . ':' . absint( $row['resource_id'] ?? 0 );
 			if ( ':' !== $active_key && $this->active_id( $active_key ) > 0 ) {
-				$this->mark_superseded( (int) $row['id'], __( 'A newer resource version is already queued.', 'elan-bridge' ) );
+				$this->mark_superseded( (int) $row['id'], __( 'A newer resource version is already queued.', 'elan-bridge' ), 'dead' );
 				continue;
 			}
 			$payload = json_decode( (string) $row['payload'], true );
@@ -320,7 +329,7 @@ final class EventOutbox implements OutboxStore {
 				$payload['occurred_at'] = gmdate( 'Y-m-d\TH:i:s\Z' );
 			}
 			if ( is_array( $payload ) && $this->enqueue( $payload ) ) {
-				$this->mark_superseded( (int) $row['id'], __( 'Manually retried as a new delivery.', 'elan-bridge' ) );
+				$this->mark_superseded( (int) $row['id'], __( 'Manually retried as a new delivery.', 'elan-bridge' ), 'dead' );
 				++$count;
 			}
 		}
@@ -370,8 +379,18 @@ final class EventOutbox implements OutboxStore {
 	 * Find the active row for a resource coalescing key.
 	 *
 	 * @param string $active_key Resource coalescing key.
+	 * @param int    $exclude_id Row ID that must not count as a newer event.
 	 */
-	private function active_id( string $active_key ): int {
+	private function active_id( string $active_key, int $exclude_id = 0 ): int {
+		if ( $exclude_id > 0 ) {
+			return (int) $this->db->get_var(
+				$this->db->prepare(
+					"SELECT id FROM {$this->table} WHERE active_key = %s AND id <> %d LIMIT 1",
+					$active_key,
+					$exclude_id
+				)
+			);
+		}
 		return (int) $this->db->get_var(
 			$this->db->prepare(
 				"SELECT id FROM {$this->table} WHERE active_key = %s LIMIT 1",
@@ -398,10 +417,11 @@ final class EventOutbox implements OutboxStore {
 	/**
 	 * Mark an obsolete event as replaced by a newer resource version.
 	 *
-	 * @param int    $id     Outbox row ID.
-	 * @param string $reason Supersession reason.
+	 * @param int    $id              Outbox row ID.
+	 * @param string $reason          Supersession reason.
+	 * @param string $expected_status State that is allowed to transition.
 	 */
-	private function mark_superseded( int $id, string $reason ): void {
+	private function mark_superseded( int $id, string $reason, string $expected_status ): void {
 		$this->db->update(
 			$this->table,
 			array(
@@ -410,7 +430,10 @@ final class EventOutbox implements OutboxStore {
 				'last_error'  => $this->limit_error( $reason ),
 				'updated_gmt' => current_time( 'mysql', true ),
 			),
-			array( 'id' => $id )
+			array(
+				'id'     => $id,
+				'status' => $expected_status,
+			)
 		);
 	}
 
