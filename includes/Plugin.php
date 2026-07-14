@@ -11,6 +11,9 @@ namespace ElanBridge;
 
 use ElanBridge\Admin\SettingsPage;
 use ElanBridge\Connection\ConnectionManager;
+use ElanBridge\Events\EventDispatcher;
+use ElanBridge\Events\EventOutbox;
+use ElanBridge\Events\ResourceChangeEmitter;
 use ElanBridge\Rest\CmsController;
 use ElanBridge\Updater\GitHubReleaseUpdater;
 use ElanBridge\Wpml\WpmlReader;
@@ -21,10 +24,9 @@ defined( 'ABSPATH' ) || exit;
  * Wires the plugin's pieces together: the REST surface the ELAN AI Bridge
  * pulls from, and the admin settings screen that configures it.
  *
- * Topology: this plugin is the *server*. The bridge's WordPressConnector is
- * the client — it authenticates with a WordPress Application Password and
- * pulls the canonical CMS shape from `/wp-json/elan/v1/...`. We never call
- * out to the bridge from here; the bridge always initiates.
+ * Content remains pull-based through `/wp-json/elan/v1/...`; small signed
+ * resource-change events provide the low-latency trigger without coupling
+ * WordPress editor requests to Bridge availability.
  */
 final class Plugin {
 
@@ -47,15 +49,20 @@ final class Plugin {
 	 * Register hooks. Called on `plugins_loaded`.
 	 */
 	public function boot(): void {
+		EventOutbox::maybe_install();
+
 		$controller = new CmsController( $this->wpml );
 		add_action( 'rest_api_init', array( $controller, 'register_routes' ) );
 
 		$connection = new ConnectionManager();
 		$connection->register_hooks();
+		$outbox     = new EventOutbox();
+		$dispatcher = new EventDispatcher( $outbox, $connection );
+		$dispatcher->register_hooks();
+		( new ResourceChangeEmitter( $this->wpml, $outbox, $connection ) )->register_hooks();
 
 		if ( is_admin() ) {
-			$settings = new SettingsPage( $connection );
-			add_action( 'admin_menu', array( $settings, 'register_menu' ) );
+			( new SettingsPage( $connection, $outbox ) )->register_hooks();
 		}
 
 		// Self-hosted updates from GitHub Releases. Registered unconditionally
@@ -73,5 +80,13 @@ final class Plugin {
 
 	public function wpml(): WpmlReader {
 		return $this->wpml;
+	}
+
+	public static function activate(): void {
+		EventOutbox::install();
+	}
+
+	public static function deactivate(): void {
+		EventDispatcher::deactivate();
 	}
 }

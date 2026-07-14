@@ -47,11 +47,23 @@ copy or paste.
 
 ## What happens next
 
-ELAN pulls the content you selected, translates it into your site's WPML
-languages, and saves each translation as the matching WPML translation of the
-original page or post. You keep reviewing and publishing in WordPress and WPML
-exactly as you do today. Translation choices — which languages, glossaries, tone
-of voice — live in your ELAN account.
+When selected source content changes, the plugin records a small notification
+locally and sends it to ELAN in the background. Saving a post never waits for
+ELAN. If ELAN is temporarily unavailable, the notification remains queued and
+is retried automatically.
+
+The notification contains only the resource ID, type, language, and a content
+version. ELAN then pulls the current content through the authenticated WordPress
+API, translates it into your site's WPML languages, and saves each translation
+as the matching WPML translation of the original page or post. You keep
+reviewing and publishing in WordPress and WPML exactly as you do today.
+Translation choices — which languages, glossaries, tone of voice — live in your
+ELAN account. Periodic reconciliation remains a fallback for changes missed
+while a site is disconnected or WP-Cron is unavailable.
+
+The connection screen shows the last successful event delivery and current
+queued/failed counts. Failed events can be retried there without resaving the
+post.
 
 ## Keeping it up to date
 
@@ -62,8 +74,9 @@ There's nothing to re-download.
 ## Disconnecting
 
 Go to **Settings → ELAN AI Bridge** and click **Disconnect**. That removes the
-connection and the secure password the plugin created for it. You can reconnect
-at any time.
+connection, stops event delivery, and removes both integration secrets the
+plugin created. You can reconnect at any time; reconnecting generates fresh
+credentials.
 
 ## Troubleshooting
 
@@ -76,6 +89,22 @@ at any time.
 - **I don't see the *ELAN AI Bridge* menu.** Only administrators can connect —
   sign in with an administrator account, and confirm the plugin is activated
   under *Plugins*.
+- **Events stay queued.** WordPress runs background delivery through WP-Cron.
+  Confirm that scheduled tasks are enabled and that the site can make outbound
+  HTTPS requests. You can retry failed deliveries from the connection screen.
+
+## Developer hooks
+
+The digest and event use the same canonical translation keys returned by the
+REST API. Add page-builder or custom-field content with
+`elan_bridge_extra_translation_keys`; those keys automatically participate in
+no-op detection. Matching write-back support is available through
+`elan_bridge_set_extra_translation_keys`.
+
+Advanced integrations may filter `elan_bridge_source_digest`,
+`elan_bridge_should_emit_resource_change`, or
+`elan_bridge_resource_change_event`. Event payload changes must remain valid for
+the version 1 canonical event schema accepted by Bridge.
 
 ## Support
 
