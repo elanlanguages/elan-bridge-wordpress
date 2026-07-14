@@ -13,8 +13,9 @@ defined( 'ABSPATH' ) || exit;
 
 /**
  * Talks to the bridge's connector endpoints, authenticated with the
- * customer's ELAN API key. Only used during connect/disconnect — once a
- * connection exists, the bridge pulls from us, not the other way round.
+ * customer's ELAN API key. Pairing sends credentials server-to-server; after
+ * that, the event dispatcher posts only signed resource identifiers while the
+ * bridge continues pulling content through the WordPress REST API.
  */
 final class BridgeClient {
 
@@ -42,7 +43,7 @@ final class BridgeClient {
 	 * Step 1 of the org-select pairing: hand the freshly-minted App Password to
 	 * the bridge server-to-server (no ELAN key) and get back an opaque handoff.
 	 *
-	 * @param array<string, mixed> $payload {site_url, username, app_password, label, post_types}.
+	 * @param array<string, mixed> $payload {site_url, username, app_password, label, post_types, webhook_secret}.
 	 * @return array<string, mixed>|\WP_Error Decoded JSON (expects `handoff_id`) or error.
 	 */
 	public function initiate( array $payload ) {

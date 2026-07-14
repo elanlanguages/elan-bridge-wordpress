@@ -49,6 +49,9 @@ if ( is_readable( ELAN_BRIDGE_DIR . 'vendor/autoload.php' ) ) {
 	);
 }
 
+register_activation_hook( ELAN_BRIDGE_FILE, array( Plugin::class, 'activate' ) );
+register_deactivation_hook( ELAN_BRIDGE_FILE, array( Plugin::class, 'deactivate' ) );
+
 // Boot once WordPress (and plugins like WPML) are loaded.
 add_action(
 	'plugins_loaded',

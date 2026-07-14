@@ -10,6 +10,7 @@ declare( strict_types=1 );
 namespace ElanBridge\Admin;
 
 use ElanBridge\Connection\ConnectionManager;
+use ElanBridge\Events\OutboxStore;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -27,11 +28,19 @@ final class SettingsPage {
 
 	/** Default ELAN app URL the plugin registers against. */
 	private const DEFAULT_BRIDGE_URL = 'https://app.elanlanguages.ai';
+	private const RETRY_ACTION       = 'elan_bridge_retry_events';
 
 	private ConnectionManager $connection;
+	private OutboxStore $outbox;
 
-	public function __construct( ConnectionManager $connection ) {
+	public function __construct( ConnectionManager $connection, OutboxStore $outbox ) {
 		$this->connection = $connection;
+		$this->outbox     = $outbox;
+	}
+
+	public function register_hooks(): void {
+		add_action( 'admin_menu', array( $this, 'register_menu' ) );
+		add_action( 'admin_post_' . self::RETRY_ACTION, array( $this, 'handle_retry' ) );
 	}
 
 	public function register_menu(): void {
@@ -67,6 +76,10 @@ final class SettingsPage {
 		} elseif ( 'error' === $notice ) {
 			$err = (string) ( $this->connection->connection()['last_error'] ?? __( 'Could not connect.', 'elan-bridge' ) );
 			$this->notice( 'error', $err );
+		} elseif ( 'retried' === $notice ) {
+			$count = absint( $_GET['elan_count'] ?? 0 );
+			/* translators: %d: number of retried events */
+			$this->notice( 'success', sprintf( _n( '%d event queued for retry.', '%d events queued for retry.', $count, 'elan-bridge' ), $count ) );
 		}
 	}
 
@@ -106,9 +119,10 @@ final class SettingsPage {
 	}
 
 	private function render_connected(): void {
-		$conn = $this->connection->connection();
+		$conn  = $this->connection->connection();
 		$saved = (array) get_option( ConnectionManager::SETTINGS_OPTION, array() );
 		$types = implode( ', ', (array) ( $saved['post_types'] ?? array( 'page' ) ) );
+		$stats = $this->outbox->stats();
 		?>
 		<div class="notice notice-success inline"><p>
 			<strong><?php esc_html_e( 'Connected', 'elan-bridge' ); ?></strong>
@@ -120,15 +134,50 @@ final class SettingsPage {
 		</p></div>
 		<table class="form-table" role="presentation">
 			<tr><th><?php esc_html_e( 'Connection ID', 'elan-bridge' ); ?></th><td><code><?php echo esc_html( (string) ( $conn['connection_id'] ?? '' ) ); ?></code></td></tr>
-			<tr><th><?php esc_html_e( 'Pulling', 'elan-bridge' ); ?></th><td><?php echo esc_html( $types ); ?></td></tr>
+			<tr><th><?php esc_html_e( 'Watching', 'elan-bridge' ); ?></th><td><?php echo esc_html( $types ); ?></td></tr>
 			<tr><th><?php esc_html_e( 'Connected at', 'elan-bridge' ); ?></th><td><?php echo esc_html( (string) ( $conn['connected_at'] ?? '' ) ); ?> UTC</td></tr>
+			<tr><th><?php esc_html_e( 'Last event delivered', 'elan-bridge' ); ?></th><td><?php echo esc_html( $stats['last_delivered'] ?? __( 'Never', 'elan-bridge' ) ); ?></td></tr>
+			<tr><th><?php esc_html_e( 'Queued events', 'elan-bridge' ); ?></th><td><?php echo esc_html( number_format_i18n( $stats['queued'] ) ); ?></td></tr>
+			<tr><th><?php esc_html_e( 'Failed events', 'elan-bridge' ); ?></th><td><?php echo esc_html( number_format_i18n( $stats['failed'] ) ); ?></td></tr>
+			<?php if ( '' !== $stats['last_error'] ) : ?>
+				<tr><th><?php esc_html_e( 'Most recent delivery error', 'elan-bridge' ); ?></th><td><code><?php echo esc_html( $stats['last_error'] ); ?></code></td></tr>
+			<?php endif; ?>
 		</table>
+		<?php if ( $stats['failed'] > 0 ) : ?>
+			<form action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" method="post">
+				<input type="hidden" name="action" value="<?php echo esc_attr( self::RETRY_ACTION ); ?>" />
+				<?php wp_nonce_field( self::RETRY_ACTION ); ?>
+				<?php submit_button( __( 'Retry failed events', 'elan-bridge' ), 'secondary', 'submit', false ); ?>
+			</form>
+		<?php endif; ?>
 		<form action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" method="post">
 			<input type="hidden" name="action" value="<?php echo esc_attr( ConnectionManager::DISCONNECT_ACTION ); ?>" />
 			<?php wp_nonce_field( ConnectionManager::DISCONNECT_ACTION ); ?>
 			<?php submit_button( __( 'Disconnect', 'elan-bridge' ), 'delete' ); ?>
 		</form>
 		<?php
+	}
+
+	public function handle_retry(): void {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( esc_html__( 'You are not allowed to do this.', 'elan-bridge' ), '', array( 'response' => 403 ) );
+		}
+		check_admin_referer( self::RETRY_ACTION );
+		$count = $this->outbox->retry_failures();
+		if ( $count > 0 ) {
+			do_action( 'elan_bridge_event_queued', '', 0 );
+		}
+		wp_safe_redirect(
+			add_query_arg(
+				array(
+					'page'        => self::PAGE_SLUG,
+					'elan_notice' => 'retried',
+					'elan_count'  => $count,
+				),
+				admin_url( 'options-general.php' )
+			)
+		);
+		exit;
 	}
 
 	/**

@@ -9,6 +9,8 @@ declare( strict_types=1 );
 
 namespace ElanBridge\Wpml;
 
+use ElanBridge\Events\LoopGuard;
+
 defined( 'ABSPATH' ) || exit;
 
 /**
@@ -57,6 +59,56 @@ final class WpmlReader {
 	public function default_language(): string {
 		$code = apply_filters( 'wpml_default_language', null );
 		return is_string( $code ) && '' !== $code ? $code : 'en';
+	}
+
+	/**
+	 * Resolve the WPML language assigned to a post.
+	 */
+	public function post_language( \WP_Post $post ): string {
+		$locale = (string) apply_filters(
+			'wpml_element_language_code',
+			null,
+			array(
+				'element_id'   => $post->ID,
+				'element_type' => 'post_' . $post->post_type,
+			)
+		);
+		return '' !== $locale ? $locale : $this->default_language();
+	}
+
+	/**
+	 * Stable digest of the same canonical source keys exposed to Bridge.
+	 *
+	 * @param ?string $locale Known post locale, when already resolved.
+	 */
+	public function source_digest( \WP_Post $post, ?string $locale = null ): string {
+		$keys       = $this->flatten_post( $post, $locale ?? $this->post_language( $post ) );
+		$normalized = array();
+		foreach ( $keys as $key ) {
+			if ( ! is_array( $key ) || ! isset( $key['key'] ) ) {
+				continue;
+			}
+			$value        = (string) ( $key['source_value'] ?? '' );
+			$normalized[] = array(
+				'key'    => (string) $key['key'],
+				'digest' => (string) ( $key['source_digest'] ?? hash( 'sha256', $value ) ),
+			);
+		}
+		usort(
+			$normalized,
+			static fn( array $left, array $right ): int => ( $left['key'] <=> $right['key'] )
+				?: ( $left['digest'] <=> $right['digest'] )
+		);
+		$digest = hash( 'sha256', (string) wp_json_encode( $normalized, JSON_UNESCAPED_SLASHES ) );
+
+		/**
+		 * Override the final source digest for specialized content stores.
+		 *
+		 * @param string  $digest Stable SHA-256 digest.
+		 * @param WP_Post $post   Source post.
+		 * @param array   $keys   Canonical translation keys used to build it.
+		 */
+		return (string) apply_filters( 'elan_bridge_source_digest', $digest, $post, $keys );
 	}
 
 	/**
@@ -151,17 +203,7 @@ final class WpmlReader {
 		}
 
 		$element_type  = 'post_' . $source->post_type;
-		$source_locale = (string) apply_filters(
-			'wpml_element_language_code',
-			null,
-			array(
-				'element_id'   => $post_id,
-				'element_type' => $element_type,
-			)
-		);
-		if ( '' === $source_locale ) {
-			$source_locale = $this->default_language();
-		}
+		$source_locale = $this->post_language( $source );
 
 		$keys = $this->flatten_post( $source, $source_locale );
 
@@ -242,19 +284,9 @@ final class WpmlReader {
 			return null;
 		}
 
-		$post_type    = $source->post_type;
+		$post_type     = $source->post_type;
 		$element_type  = 'post_' . $post_type;
-		$source_locale = (string) apply_filters(
-			'wpml_element_language_code',
-			null,
-			array(
-				'element_id'   => $source_post_id,
-				'element_type' => $element_type,
-			)
-		);
-		if ( '' === $source_locale ) {
-			$source_locale = $this->default_language();
-		}
+		$source_locale = $this->post_language( $source );
 
 		// Map canonical keys back onto post fields; collect the rest for the
 		// symmetric custom-field hook. Title is plain text; content/excerpt
@@ -281,12 +313,15 @@ final class WpmlReader {
 		$postarr['post_status'] = $source->post_status;
 
 		$existing_id = $this->translated_post_id( $source_post_id, $post_type, $locale );
-		if ( $existing_id && $existing_id !== $source_post_id ) {
-			$postarr['ID'] = $existing_id;
-			$result_id     = wp_update_post( wp_slash( $postarr ), true );
-		} else {
-			$result_id = wp_insert_post( wp_slash( $postarr ), true );
-		}
+		$result_id = LoopGuard::without_events(
+			static function () use ( $existing_id, $source_post_id, $postarr ) {
+				if ( $existing_id && $existing_id !== $source_post_id ) {
+					$postarr['ID'] = $existing_id;
+					return wp_update_post( wp_slash( $postarr ), true );
+				}
+				return wp_insert_post( wp_slash( $postarr ), true );
+			}
+		);
 
 		if ( is_wp_error( $result_id ) ) {
 			return array(

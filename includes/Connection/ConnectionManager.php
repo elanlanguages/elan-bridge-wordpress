@@ -31,8 +31,9 @@ defined( 'ABSPATH' ) || exit;
  */
 final class ConnectionManager {
 
-	public const CONNECTION_OPTION = 'elan_bridge_connection';
-	public const SETTINGS_OPTION   = 'elan_bridge_settings';
+	public const CONNECTION_OPTION     = 'elan_bridge_connection';
+	public const SETTINGS_OPTION       = 'elan_bridge_settings';
+	public const WEBHOOK_SECRET_OPTION = 'elan_bridge_webhook_secret';
 
 	public const CONNECT_INIT_ACTION = 'elan_bridge_connect_init';
 	public const DISCONNECT_ACTION   = 'elan_bridge_disconnect';
@@ -86,14 +87,19 @@ final class ConnectionManager {
 
 		$user = wp_get_current_user();
 
-		// Revoke any App Password left dangling by a previous, unfinished attempt.
+		// A new pairing always rotates both integration credentials. This also
+		// cleans up any unfinished attempt before minting the replacement.
 		$prev = $this->connection();
-		if ( 'pending' === ( $prev['status'] ?? '' ) && ! empty( $prev['app_password_uuid'] ) ) {
+		if ( ! empty( $prev['app_password_uuid'] ) ) {
 			WP_Application_Passwords::delete_application_password(
 				(int) ( $prev['user_id'] ?? $user->ID ),
 				(string) $prev['app_password_uuid']
 			);
 		}
+		if ( ! empty( $prev['state'] ) ) {
+			delete_transient( self::STATE_TRANSIENT . $prev['state'] );
+		}
+		$this->clear_webhook_secret();
 
 		$created = WP_Application_Passwords::create_new_application_password(
 			$user->ID,
@@ -104,20 +110,24 @@ final class ConnectionManager {
 			$this->redirect( 'error' );
 		}
 		[ $password, $item ] = $created;
+		$webhook_secret      = $this->new_webhook_secret();
+		$this->store_webhook_secret( $webhook_secret );
 
 		$resp = ( new BridgeClient( $bridge_url ) )->initiate(
 			array(
-				'site_url'     => home_url(),
-				'username'     => $user->user_login,
-				'app_password' => $password,
-				'label'        => get_bloginfo( 'name' ) . ' — ' . wp_parse_url( home_url(), PHP_URL_HOST ),
-				'post_types'   => $post_types,
+				'site_url'       => home_url(),
+				'username'       => $user->user_login,
+				'app_password'   => $password,
+				'label'          => get_bloginfo( 'name' ) . ' — ' . wp_parse_url( home_url(), PHP_URL_HOST ),
+				'post_types'     => $post_types,
+				'webhook_secret' => $webhook_secret,
 			)
 		);
 
 		if ( is_wp_error( $resp ) || empty( $resp['handoff_id'] ) ) {
 			// Roll back the password we just minted so nothing dangles.
 			WP_Application_Passwords::delete_application_password( $user->ID, $item['uuid'] );
+			$this->clear_webhook_secret();
 			$this->fail(
 				is_wp_error( $resp )
 					? $resp->get_error_message()
@@ -201,6 +211,7 @@ final class ConnectionManager {
 				'last_error'        => '',
 			)
 		);
+		do_action( 'elan_bridge_connected', (string) ( $_GET['connection_id'] ?? '' ) );
 
 		$this->redirect( 'connected' );
 	}
@@ -226,6 +237,7 @@ final class ConnectionManager {
 		if ( ! empty( $conn['state'] ) ) {
 			delete_transient( self::STATE_TRANSIENT . $conn['state'] );
 		}
+		$this->clear_webhook_secret();
 		delete_option( self::CONNECTION_OPTION );
 	}
 
@@ -243,7 +255,7 @@ final class ConnectionManager {
 	 * connect supersedes it (the bridge keeps one active WordPress connection
 	 * per org). This flow holds no ELAN key to call the bridge with.
 	 */
-	private function disconnect(): void {
+	public function disconnect(): void {
 		$conn = $this->connection();
 		if ( ! empty( $conn['app_password_uuid'] ) ) {
 			WP_Application_Passwords::delete_application_password(
@@ -254,7 +266,9 @@ final class ConnectionManager {
 		if ( ! empty( $conn['state'] ) ) {
 			delete_transient( self::STATE_TRANSIENT . $conn['state'] );
 		}
+		$this->clear_webhook_secret();
 		delete_option( self::CONNECTION_OPTION );
+		do_action( 'elan_bridge_disconnected' );
 	}
 
 	// -- helpers -----------------------------------------------------------
@@ -267,6 +281,18 @@ final class ConnectionManager {
 	}
 
 	private function fail( string $message ): WP_Error {
+		$conn = $this->connection();
+		if ( ! empty( $conn['app_password_uuid'] ) ) {
+			WP_Application_Passwords::delete_application_password(
+				(int) ( $conn['user_id'] ?? get_current_user_id() ),
+				(string) $conn['app_password_uuid']
+			);
+		}
+		if ( ! empty( $conn['state'] ) ) {
+			delete_transient( self::STATE_TRANSIENT . $conn['state'] );
+		}
+		$this->clear_webhook_secret();
+
 		// Reset to a clean disconnected state carrying the error for display.
 		update_option(
 			self::CONNECTION_OPTION,
@@ -276,6 +302,25 @@ final class ConnectionManager {
 			)
 		);
 		return new WP_Error( 'elan_bridge_connect_failed', $message );
+	}
+
+	private function new_webhook_secret(): string {
+		try {
+			return bin2hex( random_bytes( 32 ) );
+		} catch ( \Throwable $error ) {
+			unset( $error );
+			return wp_generate_password( 64, false, false );
+		}
+	}
+
+	private function store_webhook_secret( string $secret ): void {
+		delete_option( self::WEBHOOK_SECRET_OPTION );
+		// Explicitly non-autoloaded: this credential is only needed by cron.
+		add_option( self::WEBHOOK_SECRET_OPTION, $secret, '', 'no' );
+	}
+
+	private function clear_webhook_secret(): void {
+		delete_option( self::WEBHOOK_SECRET_OPTION );
 	}
 
 	private function redirect( string $notice ): void {
